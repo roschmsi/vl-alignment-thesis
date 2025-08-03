@@ -3,7 +3,7 @@
 #==============================================================================#
 #                              VISION MODEL                                      #
 #==============================================================================#
-vision_model="apple/aimv2-large-patch14-224"
+vision_model="facebook/dinov2-large"
 # Available options:
 # vision_model="ijepa-huge"                    # IJEPA
 # vision_model="openai/clip-vit-large-patch14" # OpenAI CLIP
@@ -53,7 +53,7 @@ batch_size=1024 # adjust based on GPU memory
 # agg_mode: "concat" (concatenate cls with all patch tokens and average pool) or "cls" (use cls token only)
 source_caption="longSV_captions"
 agg_mode="concat"
-
+outpur_dir=""
 
 # Program 
 gpu_count=$SLURM_GPUS_ON_NODE
@@ -87,5 +87,6 @@ else
     --data $data \
     --resume \
     --source_caption $source_caption \
-    --agg_mode $agg_mode
+    --agg_mode $agg_mode \
+    --output_dir $output_dir
 fi
