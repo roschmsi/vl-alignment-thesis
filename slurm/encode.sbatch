@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="encode"
-#SBATCH -p lrz-hgx-a100-80x4
+#SBATCH -p lrz-hgx-h100-94x4
 #SBATCH --gres=gpu:1
 #SBATCH --time=48:00:00
 #SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j.out

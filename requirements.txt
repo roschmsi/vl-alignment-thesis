@@ -3,7 +3,6 @@ bitsandbytes==0.42.0
 datasets==2.17.0
 decord==0.6.0
 deepspeed==0.14.4
-flash_attn==2.6.2
 fsspec==2023.10.0
 fvcore==0.1.5.post20221221
 huggingface_hub==0.24.6
@@ -24,7 +23,7 @@ shortuuid==1.0.13
 thop==0.1.1.post2209072238
 timm==0.6.13
 tokenizers==0.20.3
-torch==2.5.0
-torchvision==0.16.2
+torch
+torchvision
 tqdm==4.65.0
-transformers==4.47.0.dev0
+transformers

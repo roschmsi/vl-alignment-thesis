@@ -53,7 +53,7 @@ batch_size=1024 # adjust based on GPU memory
 # agg_mode: "concat" (concatenate cls with all patch tokens and average pool) or "cls" (use cls token only)
 source_caption="longSV_captions"
 agg_mode="concat"
-outpur_dir=""
+outpur_dir="/dss/mcmlscratch/07/ga27tus3"
 
 # Program 
 gpu_count=$SLURM_GPUS_ON_NODE
