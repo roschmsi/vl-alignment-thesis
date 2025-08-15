@@ -28,6 +28,7 @@ from train.optimizer import Lion
 
 from model import create_model, create_loss, create_loss
 from data import get_data
+import pdb
 
 
 LATEST_CHECKPOINT_NAME = "epoch_latest.pt"
@@ -164,6 +165,7 @@ def main(args):
         logit_bias = args.logit_bias,
         width_factor = args.width_factor,
         sharelock = args.sharelock,
+        hidden_states = args.hidden_states,
         **model_kwargs
     )
     # print trainanble parameters

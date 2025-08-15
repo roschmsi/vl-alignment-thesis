@@ -32,8 +32,8 @@ def is_image_file_exist(base_path, row):
             return row  # Return row data if successful
     except FileNotFoundError:
         return None  # Return None if image doesn't exist
-    except (UnidentifiedImageError, OSError) as e:  # Catch OSError for truncated files
-        print(f"Invalid image or read error: {image_path}, {e}")
+    except Exception as e:  # Catch OSError for truncated files
+        print(f"Invalid image or read error: {image_path}, Error: {e}")
         return None  # Return None if image is invalid or has read error
 
 

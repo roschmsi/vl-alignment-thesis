@@ -73,6 +73,11 @@ def parse_args():
         type=str,
         help="Directory in which the embeddings will be stored.",
     )
+    parser.add_argument(
+        "--output_hidden_states",
+        action="store_true",
+        help="Output the hidden states of a model"
+    )
     return parser.parse_args()
 
 
@@ -204,7 +209,7 @@ def encode_text(args, sentences, start_index):
     print(f"Output directory: {output_dir}")
     if not args.resume and os.path.exists(output_dir):
         exit()
-    model = SentenceEmbedding(args.text_model_name)
+    model = SentenceEmbedding(args.text_model_name, output_hidden_states=args.output_hidden_states)
     model = model.half().to("cuda")  # Move model to GPU and convert to FP16
     model.eval()
     process_batch(
@@ -243,7 +248,7 @@ def encode_image(args, images, start_index):
     if not args.resume and os.path.exists(output_dir):
         logging.info(f"{output_dir} already exists, skipping...")
         exit()
-    model = ImageEmbedding(args.vision_model_name, agg_mode=args.agg_mode)
+    model = ImageEmbedding(args.vision_model_name, agg_mode=args.agg_mode, output_hidden_states=args.output_hidden_states)
     model = model.to("cuda")  # Move model to GPU
     model.eval()
     process_batch(

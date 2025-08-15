@@ -13,6 +13,7 @@ except:
 from packaging import version
 import transformers
 from .dinoforseg import Dinov2EncoderForSegmentation
+import pdb
 
 from .mae import get_mae_vit
 from .ibot import get_ibot_vit
@@ -61,12 +62,13 @@ class CustomImageProcessor(ImageProcessingMixin):
 
 
 class ImageEmbedding(nn.Module):
-    def __init__(self, model_name="facebook/dinov2-base", device=None, seg: bool = False, agg_mode='concat'):
+    def __init__(self, model_name="facebook/dinov2-base", device=None, seg: bool = False, agg_mode='concat', output_hidden_states=False):
         super(ImageEmbedding, self).__init__()
         self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
         self.seg = seg
         self.agg_mode = agg_mode
         self.model_name = model_name
+        self.output_hidden_states = output_hidden_states
 
         if any(x in model_name for x in ['ibot', 'mae', 'dinov1', 'ml-aim', 'ijepa']):
             # load from local
@@ -118,17 +120,21 @@ class ImageEmbedding(nn.Module):
             self.image_processor = AutoImageProcessor.from_pretrained(model_name)
 
     def load_images_from_directory(self, images_path: List[str]) -> List[Image.Image]:
-
         def load_single_image(args):
             idx, image_path = args
             with Image.open(image_path) as img:
-                return idx, img.convert("RGB")
+                img = img.convert("RGB").copy()
+                if min(img.size) < 2:  # resize tiny images to at least 2×2
+                    new_w = max(img.size[0], 2)
+                    new_h = max(img.size[1], 2)
+                    img = img.resize((new_w, new_h)).convert("RGB")
+                return idx, img
         
         images = [None] * len(images_path)
         with ThreadPoolExecutor() as executor:
             # Submit tasks with indices to maintain order
             futures = {executor.submit(load_single_image, (i, path)): i 
-                      for i, path in enumerate(images_path)}
+                    for i, path in enumerate(images_path)}
             
             # Collect results in order
             for future in as_completed(futures):
@@ -170,40 +176,53 @@ class ImageEmbedding(nn.Module):
                     outputs = self.model(inputs['pixel_values'])
                 else:
                     # huggingface transformer vision model
-                    outputs = self.model(**inputs)
+                    outputs = self.model(**inputs, output_hidden_states=self.output_hidden_states)
             else:
                 raise ValueError(f"Unsupported input type: {type(inputs)}")
             
         # extract the embeddings
-        if any(x in self.model_name.lower() for x in ['ijepa']):
-            embedding = outputs.mean(dim=1)
-        elif any(x in self.model_name.lower() for x in ['clip']):
-            embedding = outputs.pooler_output
-        elif any(x in self.model_name.lower() for x in ['aimv2']):
-            embedding = torch.mean(outputs.last_hidden_state, dim=1)
-        else:
-            sequence_output = outputs[0]  # batch_size, sequence_length, hidden_size
-
-            if patch_mode:
-                patch_tokens = sequence_output[:, 1:]
-                cls_token = sequence_output[:, 0].unsqueeze(1).repeat(1, patch_tokens.shape[1], 1)
-                embedding = torch.cat([cls_token, patch_tokens], dim=-1)
+        if self.output_hidden_states:
+            embedding = torch.stack(outputs['hidden_states']).permute(1, 2, 3, 0)
+            cls_token = embedding[:, 0]
+            patch_tokens = embedding[:, 1:]
+            if self.agg_mode == 'patch':
+                embedding = patch_tokens.mean(dim=1)
+            elif self.agg_mode == 'cls':
+                embedding = cls_token
+            elif self.agg_mode == 'concat':
+                embedding = torch.cat([cls_token, patch_tokens.mean(dim=1)], dim=1)
             else:
-                if any(x in self.model_name.lower() for x in ['ibot', 'mae', 'dinov1']):
-                    embedding = outputs
-                elif any(x in self.model_name.lower() for x in ['aim']):
-                    embedding = outputs[1]
-                else:
-                    cls_token = sequence_output[:, 0]
+                raise ValueError(f"Invalid agg_mode: {self.agg_mode}")
+        else:
+            if any(x in self.model_name.lower() for x in ['ijepa']):
+                embedding = outputs.mean(dim=1)
+            elif any(x in self.model_name.lower() for x in ['clip']):
+                embedding = outputs.pooler_output
+            elif any(x in self.model_name.lower() for x in ['aimv2']):
+                embedding = torch.mean(outputs.last_hidden_state, dim=1)
+            else:
+                sequence_output = outputs[0]  # batch_size, sequence_length, hidden_size
+
+                if patch_mode:
                     patch_tokens = sequence_output[:, 1:]
-                    if self.agg_mode == 'patch': 
-                        embedding = patch_tokens.mean(dim=1)
-                    elif self.agg_mode == 'cls':
-                        embedding = cls_token
-                    elif self.agg_mode == 'concat':
-                        embedding = torch.cat([cls_token, patch_tokens.mean(dim=1)], dim=1)
+                    cls_token = sequence_output[:, 0].unsqueeze(1).repeat(1, patch_tokens.shape[1], 1)
+                    embedding = torch.cat([cls_token, patch_tokens], dim=-1)
+                else:
+                    if any(x in self.model_name.lower() for x in ['ibot', 'mae', 'dinov1']):
+                        embedding = outputs
+                    elif any(x in self.model_name.lower() for x in ['aim']):
+                        embedding = outputs[1]
                     else:
-                        raise ValueError(f"Invalid agg_mode: {self.agg_mode}")
+                        cls_token = sequence_output[:, 0]
+                        patch_tokens = sequence_output[:, 1:]
+                        if self.agg_mode == 'patch':
+                            embedding = patch_tokens.mean(dim=1)
+                        elif self.agg_mode == 'cls':
+                            embedding = cls_token
+                        elif self.agg_mode == 'concat':
+                            embedding = torch.cat([cls_token, patch_tokens.mean(dim=1)], dim=1)
+                        else:
+                            raise ValueError(f"Invalid agg_mode: {self.agg_mode}")
 
         return embedding
 

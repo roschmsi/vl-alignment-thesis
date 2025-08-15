@@ -567,6 +567,12 @@ def parse_args(args):
         default=0.0051,
         help='Lambda parameter for Barlow Twins loss.'
     )
+    parser.add_argument(
+        "--hidden_states",
+        default=False,
+        action="store_true",
+        help='Use hidden states for alignment.'
+    )
 
     args = parser.parse_args(args)
 

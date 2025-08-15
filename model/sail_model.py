@@ -13,12 +13,13 @@ from .linear import StarMLP, SiglipMLP, SwiGLU, ShareLockMLP
 from torch.cuda.amp import autocast
 from functools import partial
 import numpy as np
+import pdb
 
 
 class AlignmentLayer(nn.Module):
     def __init__(
         self,
-        vision_dimesion: int,
+        vision_dimension: int,
         text_dimension: int = None,
         target_dimension: int = 1024,
         linear_type: str = "star",
@@ -27,9 +28,16 @@ class AlignmentLayer(nn.Module):
         logit_bias: float = -10.0,
         only_vision: bool = False,
         width_factor: int = 8,
+        hidden_states = False,
     ):
         super(AlignmentLayer, self).__init__()
         assert only_vision or text_dimension is not None, "text_dimension must be provided if only_vision is False"
+
+        # TODO relax this constraint
+        num_hidden_states = 1
+
+        if hidden_states:
+            num_hidden_states = 3
 
         self.cast_dtype = cast_dtype
         self.linear_type = linear_type
@@ -41,19 +49,21 @@ class AlignmentLayer(nn.Module):
             LinearLayer = nn.Linear
 
         self.vision_mapping_network = LinearLayer(
-            vision_dimesion, target_dimension
+            vision_dimension * num_hidden_states, target_dimension
         )
-        self.vision_layer_norm = nn.LayerNorm(vision_dimesion)
+        self.vision_layer_norm = nn.LayerNorm(vision_dimension * num_hidden_states)
 
         if not only_vision:
             self.text_mapping_network = LinearLayer(
-                text_dimension, target_dimension
+                text_dimension * num_hidden_states, target_dimension
             )
-            self.text_layer_norm = nn.LayerNorm(text_dimension)
+            self.text_layer_norm = nn.LayerNorm(text_dimension * num_hidden_states)
 
         self.logit_scale = nn.Parameter(torch.randn(1))
         self.logit_bias = nn.Parameter(torch.randn(1))
         self._initialize_weights(logit_scale, logit_bias)
+
+        self.hidden_states = hidden_states
 
     def _initialize_weights(self, scale: float, bias: float):
 
@@ -78,7 +88,19 @@ class AlignmentLayer(nn.Module):
     @property
     def get_logit_bias(self):
         return self.logit_bias
-     
+
+    def extract_hidden_states(self, features):
+        n_layers = features.size(2)
+        third = n_layers // 3
+
+        idx1 = third
+        idx2 = 2 * third
+
+        features = features[:, :, [idx1, idx2, -1]]
+        features = torch.flatten(features, start_dim=1, end_dim=2)
+
+        return features
+            
     def forward(self, image_features=None, text_features=None, extra_text_features=None, compute_logits=False):
 
         if image_features is None and text_features is None:
@@ -86,6 +108,8 @@ class AlignmentLayer(nn.Module):
                 "At least one of image_features and text_features should be provided."
             )
         if image_features is not None:
+            if self.hidden_states:
+                image_features = self.extract_hidden_states(image_features)
             image_features = image_features.to(self.cast_dtype)
             image_features = self.vision_layer_norm(image_features)
             image_features = self.vision_mapping_network(image_features)
@@ -93,6 +117,8 @@ class AlignmentLayer(nn.Module):
             image_features = None
 
         if text_features is not None:
+            if self.hidden_states:
+                text_features = self.extract_hidden_states(text_features)
             text_features = text_features.to(self.cast_dtype)
             text_features = self.text_layer_norm(text_features)
             text_features = self.text_mapping_network(text_features)
@@ -130,7 +156,7 @@ class AlignmentLayer(nn.Module):
 class ShareLockAlignmentLayer(nn.Module):
     def __init__(
         self,
-        vision_dimesion: int,
+        vision_dimension: int,
         text_dimension: int = None,
         target_dimension: int = None,
         linear_type: str = None,
@@ -143,7 +169,7 @@ class ShareLockAlignmentLayer(nn.Module):
         super(ShareLockAlignmentLayer, self).__init__()
         self.cast_dtype = cast_dtype
         # no vision alignment layer overhead
-        target_dimension = vision_dimesion 
+        target_dimension = vision_dimension 
         hidden_dim = 4096
         self.text_mapping_network = ShareLockMLP(
             text_dimension, hidden_dim, target_dimension
@@ -236,7 +262,7 @@ class SAILModel(nn.Module):
             vision_dimesion = self.vision_model.model.config.hidden_size * 2
         LayerClass = ShareLockAlignmentLayer if sharelock else AlignmentLayer
         self.vlhead = LayerClass(
-            vision_dimesion = vision_dimesion,
+            vision_dimension = vision_dimesion,
             text_dimension = self.text_model.model.config.hidden_size,
             target_dimension = target_dimension,
             linear_type = linear_type,
@@ -260,7 +286,7 @@ class SAILModel(nn.Module):
             param.requires_grad = True
 
     def load_vlhead_weights(self, vlhead_weights_path):
-        weights = torch.load(vlhead_weights_path)
+        weights = torch.load(vlhead_weights_path, weights_only=False)
         if "state_dict" in weights:
             weights = weights["state_dict"]
         msg = self.vlhead.load_state_dict(weights, strict=False)
@@ -397,7 +423,7 @@ if __name__ == "__main__":
     from thop import profile
     # 初始化模型
     model = AlignmentLayer(
-        vision_dimesion=2048,
+        vision_dimension=2048,
         text_dimension=1024,  
         target_dimension=1024, 
         linear_type="raw"    

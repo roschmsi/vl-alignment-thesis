@@ -6,6 +6,7 @@ import glob
 from natsort import natsorted
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
+import pdb
 
 def custom_collate_fn(batch):
     if len(batch[0]) == 3:
@@ -28,6 +29,8 @@ def load_vectors(embedding_list: list[str]) -> list[torch.Tensor]:
     for dir_path in embedding_list:
         files.extend(natsorted(glob.glob(os.path.join(dir_path, "*.pt"))))
     vectors = []
+    # TODO reset debugging mode
+    # files = files[:100]
     for file in tqdm(files, desc="Loading embedding data", unit="file"):
         vectors.extend(torch.load(file, weights_only=True).to(torch.float16))
     return vectors
@@ -56,8 +59,8 @@ class VLEmbeddingDataset(Dataset):
         self.image_num = len(self.image_vectors)
         self.text_num = len(self.text_vectors)
 
-        self.visual_dim = self.image_vectors[0].shape[-1]
-        self.text_dim = self.text_vectors[0].shape[-1]
+        self.visual_dim = self.image_vectors[0].shape[0]
+        self.text_dim = self.text_vectors[0].shape[0]
         
     def _load_image_text_vectors(self, image_embedding_list = None, text_embedding_list = None):
         assert image_embedding_list is not None or text_embedding_list is not None, "Either image_embedding_list or text_embedding_list must be provided"
