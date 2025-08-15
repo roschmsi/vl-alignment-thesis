@@ -1,6 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name="encode"
-#SBATCH -p lrz-hgx-a100-80x4
+#SBATCH --job-name="train alignment"
+#SBATCH --qos=mcml
+#SBATCH -p mcml-hgx-a100-80x4
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
 #SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j.out
@@ -9,4 +10,4 @@
 source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
 conda activate sail_env_2
 
-bash /dss/dsshome1/07/ga27tus3/vision-language-alignment/scripts/encode.sh
+bash /dss/dsshome1/07/ga27tus3/vision-language-alignment/scripts/sail_train.sh

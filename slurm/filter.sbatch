@@ -12,7 +12,7 @@
 source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
 conda activate sail_env_2
 
-srun python /dss/dsshome1/07/ga27tus3/SAIL/data_preparation/filter.py \
+srun python /dss/dsshome1/07/ga27tus3/vision-language-alignment/data_preparation/filter.py \
 --input_csv_file /dss/mcmlscratch/07/ga27tus3/cc3m_3long_3short_1raw_captions_url.csv \
 --image_base_path /dss/mcmlscratch/07/ga27tus3 \
 --chunk_size 5000
