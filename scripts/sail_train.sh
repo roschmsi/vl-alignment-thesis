@@ -9,17 +9,19 @@ width_factor=8
 logit_scale=20
 logit_bias=-10
 
-text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_raw_caption data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_raw_caption data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_raw_caption" 
-image_embedding_list="data/tensor_data/image_embedding/dinov2-base/yfcc15m data/tensor_data/image_embedding/dinov2-base/dreamclipcc3m data/tensor_data/image_embedding/dinov2-base/dreamclipcc12mhf"
-extra_text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_shortSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_longSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_shortSV_captions"
-output_name="sail_l_nv2_merged23m"
+# text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_raw_caption data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_raw_caption data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_raw_caption" 
+# image_embedding_list="data/tensor_data/image_embedding/dinov2-base/yfcc15m data/tensor_data/image_embedding/dinov2-base/dreamclipcc3m data/tensor_data/image_embedding/dinov2-base/dreamclipcc12mhf"
+# extra_text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_shortSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_longSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_shortSV_captions"
+# output_name="sail_l_nv2_merged23m"
+
+text_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_longSV_captions" 
+image_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/image_embedding/dinov2-large/dreamclipcc3m_concat"
+output_name="sail_dinov2l_nv2_cc3m_hidden"
 # ------------------------------------------------------------
 
-
-python main.py \
+python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --text-embedding-list $text_embedding_list \
     --image-embedding-list $image_embedding_list \
-    --extra-text-embedding-list $extra_text_embedding_list \
     --val-frequency 1 \
     --dataset-type embedding \
     --seed 42 \
@@ -35,12 +37,13 @@ python main.py \
     --wd 1e-4 \
     --target-dimension $d \
     --linear-type star \
-    --diagonal-weight 0 \
     --log-every-n-steps 5 \
     --wandb-project-name sail_train \
     --name $output_name \
     --logit_scale $logit_scale \
-    --logit_bias $logit_bias
+    --logit_bias $logit_bias \
+    --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs \
+    --hidden_states
 
 
 

@@ -37,12 +37,12 @@ data="dreamclipcc3m"
 #                         image or text encoding                                #
 #==============================================================================#
 
-domain="image" # "image" or "text", each time we only encode one modality
+domain="text" # "image" or "text", each time we only encode one modality
 
 #==============================================================================#
 #                             BATCH SIZE                                         #
 #==============================================================================#
-batch_size=1024 # adjust based on GPU memory
+batch_size=32 # adjust based on GPU memory
 #==============================================================================#
 #                           Additional options                                  #
 #==============================================================================#
@@ -53,7 +53,7 @@ batch_size=1024 # adjust based on GPU memory
 # agg_mode: "concat" (concatenate cls with all patch tokens and average pool) or "cls" (use cls token only)
 source_caption="longSV_captions"
 agg_mode="concat"
-outpur_dir="/dss/mcmlscratch/07/ga27tus3"
+output_dir="/dss/mcmlscratch/07/ga27tus3"
 
 # Program 
 gpu_count=$SLURM_GPUS_ON_NODE
@@ -66,10 +66,10 @@ if [ "$gpu_count" -eq 4 ]; then # If use multiple GPUs, please make sure the end
     echo "bash output: Using domain: $domain"
     echo "bash output: Each GPU will use save batch size of $batch_size"
     echo "bash output: Using source caption: $source_caption"
-    CUDA_VISIBLE_DEVICES=0 python encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --end_index 6144000 --source_caption $source_caption &
-    CUDA_VISIBLE_DEVICES=1 python encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 6144000 --end_index 12288000 --source_caption $source_caption &
-    CUDA_VISIBLE_DEVICES=2 python encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 12288000 --end_index 18432000 --source_caption $source_caption &
-    CUDA_VISIBLE_DEVICES=3 python encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 18432000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=0 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --end_index 6144000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=1 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 6144000 --end_index 12288000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=2 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 12288000 --end_index 18432000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=3 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 18432000 --source_caption $source_caption &
     wait
 else
     echo "bash output: Running tasks sequentially on a single GPU..."
@@ -79,7 +79,7 @@ else
     echo "bash output: Using domain: $domain"
     echo "bash output: Using batch size: $batch_size"
     echo "bash output: Using source caption: $source_caption"
-    python encode.py \
+    python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py \
     --domain $domain \
     --vision_model_name $vision_model \
     --text_model_name $text_model \
@@ -88,5 +88,6 @@ else
     --resume \
     --source_caption $source_caption \
     --agg_mode $agg_mode \
-    --output_dir $output_dir
+    --output_dir $output_dir \
+    --output_hidden_states
 fi

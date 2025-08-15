@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # -----------------------MODEL SETTING------------------------
-vision_model="facebook/dinov2-base"
+vision_model="facebook/dinov2-large"
 # vision_model="facebook/dinov2-large"
 # vision_model="ijepa-huge"
 # vision_model="facebook/dinov2-giant"
@@ -23,12 +23,12 @@ vision_model="facebook/dinov2-base"
 text_model="nvidia/NV-Embed-v2"
 # ------------------------------------------------------------ 
   
-CKPT="" # path to the checkpoint .pt file, make sure the vision and text model match the checkpoint
-DATASET_ROOT_DIR=""
+CKPT="/dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs/sail_dinov2l_nv2_cc3m/checkpoints/epoch_98.pt" # path to the checkpoint .pt file, make sure the vision and text model match the checkpoint
+DATASET_ROOT_DIR="/dss/mcmlscratch/07/ga27tus3/data"
 
 
 # imagenetv1 COCO winoground MMVP
-for task in imagenetv1 COCO winoground MMVP
+for task in imagenetv1
 do
     # check if the checkpoint exists
     if [ ! -f $checkpoint_path ]; then
@@ -38,7 +38,7 @@ do
     echo "########################################################"
     echo "Evaluating checkpoint: $checkpoint_path"
 
-    python eval.py \
+    python /dss/dsshome1/07/ga27tus3/vision-language-alignment/eval.py \
         --head-weights-path $CKPT \
         --task $task \
         --vision-model $vision_model \
