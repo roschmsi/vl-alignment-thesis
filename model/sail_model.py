@@ -14,6 +14,7 @@ from torch.cuda.amp import autocast
 from functools import partial
 import numpy as np
 import pdb
+from data.embedding_data import extract_hidden_states
 
 
 class AlignmentLayer(nn.Module):
@@ -33,12 +34,6 @@ class AlignmentLayer(nn.Module):
         super(AlignmentLayer, self).__init__()
         assert only_vision or text_dimension is not None, "text_dimension must be provided if only_vision is False"
 
-        # TODO relax this constraint
-        num_hidden_states = 1
-
-        if hidden_states:
-            num_hidden_states = 3
-
         self.cast_dtype = cast_dtype
         self.linear_type = linear_type
         if linear_type == "star":
@@ -49,15 +44,15 @@ class AlignmentLayer(nn.Module):
             LinearLayer = nn.Linear
 
         self.vision_mapping_network = LinearLayer(
-            vision_dimension * num_hidden_states, target_dimension
+            vision_dimension, target_dimension
         )
-        self.vision_layer_norm = nn.LayerNorm(vision_dimension * num_hidden_states)
+        self.vision_layer_norm = nn.LayerNorm(vision_dimension)
 
         if not only_vision:
             self.text_mapping_network = LinearLayer(
-                text_dimension * num_hidden_states, target_dimension
+                text_dimension, target_dimension
             )
-            self.text_layer_norm = nn.LayerNorm(text_dimension * num_hidden_states)
+            self.text_layer_norm = nn.LayerNorm(text_dimension)
 
         self.logit_scale = nn.Parameter(torch.randn(1))
         self.logit_bias = nn.Parameter(torch.randn(1))
@@ -88,18 +83,6 @@ class AlignmentLayer(nn.Module):
     @property
     def get_logit_bias(self):
         return self.logit_bias
-
-    def extract_hidden_states(self, features):
-        n_layers = features.size(2)
-        third = n_layers // 3
-
-        idx1 = third
-        idx2 = 2 * third
-
-        features = features[:, :, [idx1, idx2, -1]]
-        features = torch.flatten(features, start_dim=1, end_dim=2)
-
-        return features
             
     def forward(self, image_features=None, text_features=None, extra_text_features=None, compute_logits=False):
 
@@ -108,8 +91,6 @@ class AlignmentLayer(nn.Module):
                 "At least one of image_features and text_features should be provided."
             )
         if image_features is not None:
-            if self.hidden_states:
-                image_features = self.extract_hidden_states(image_features)
             image_features = image_features.to(self.cast_dtype)
             image_features = self.vision_layer_norm(image_features)
             image_features = self.vision_mapping_network(image_features)
@@ -117,8 +98,6 @@ class AlignmentLayer(nn.Module):
             image_features = None
 
         if text_features is not None:
-            if self.hidden_states:
-                text_features = self.extract_hidden_states(text_features)
             text_features = text_features.to(self.cast_dtype)
             text_features = self.text_layer_norm(text_features)
             text_features = self.text_mapping_network(text_features)
@@ -232,8 +211,6 @@ class ShareLockAlignmentLayer(nn.Module):
             "logit_scale": self.get_logit_scale,
             "logit_bias": self.get_logit_bias
         }
-
-
         
 
 class SAILModel(nn.Module):
@@ -249,28 +226,53 @@ class SAILModel(nn.Module):
         agg_mode: str = 'concat',
         width_factor: int = 8,
         sharelock: bool = False,
+        hidden_states=False,
+        reconstruction=False,
     ):
         super(SAILModel, self).__init__()
-        self.text_model = SentenceEmbedding(text_model_name)
-        self.vision_model = ImageEmbedding(vision_model_name, seg=seg, agg_mode=agg_mode)
+        self.text_model = SentenceEmbedding(text_model_name, output_hidden_states=hidden_states)
+        self.vision_model = ImageEmbedding(vision_model_name, seg=seg, agg_mode=agg_mode, output_hidden_states=hidden_states)
         if any(x in vision_model_name for x in ['mae','ibot','dinov1','ml-aim','ijepa','clip','aimv2']) or 'patch' in agg_mode or 'cls' in agg_mode:
             if hasattr(self.vision_model.model, 'config'):
-                vision_dimesion = self.vision_model.model.config.hidden_size
+                vision_dimension = self.vision_model.model.config.hidden_size
             else:
-                vision_dimesion = self.vision_model.model.embed_dim
+                vision_dimension = self.vision_model.model.embed_dim
         else:
-            vision_dimesion = self.vision_model.model.config.hidden_size * 2
+            vision_dimension = self.vision_model.model.config.hidden_size * 2
         LayerClass = ShareLockAlignmentLayer if sharelock else AlignmentLayer
+        
+        text_dimension = self.text_model.model.config.hidden_size
+
+        if hidden_states:
+            vision_dimension = vision_dimension * 3
+            text_dimension = text_dimension * 3
+
         self.vlhead = LayerClass(
-            vision_dimension = vision_dimesion,
-            text_dimension = self.text_model.model.config.hidden_size,
+            vision_dimension = vision_dimension ,
+            text_dimension = text_dimension,
             target_dimension = target_dimension,
             linear_type = linear_type,
             cast_dtype = cast_dtype,
             width_factor = width_factor,
-        )  
+            hidden_states=hidden_states,
+        )
         if vlhead_weights_path is not None:
             self.load_vlhead_weights(vlhead_weights_path)
+
+        self.reconstruction = reconstruction
+
+        if self.reconstruction:
+            self.reconstruction_head = ReconstructionHead(
+                vision_dimension = vision_dimension ,
+                text_dimension = text_dimension,
+                target_dimension = target_dimension,
+                linear_type = linear_type,
+                cast_dtype = cast_dtype,
+                width_factor = width_factor,
+                hidden_states=hidden_states,
+            )
+
+        self.hidden_states = hidden_states
 
     def freeze_except_vlhead(self):
         self._freeze_parameters(self.vision_model)
@@ -307,10 +309,16 @@ class SAILModel(nn.Module):
         attetion_type: str = 'qk',
         ignore_residual: bool = False,
     ):
+        # pdb.set_trace()
+
         if is_pre_encoded:
             features = image
         else:
             features = self.vision_model(image, patch_mode=patch_mode, attetion_type=attetion_type, ignore_residual=ignore_residual)
+
+        if self.hidden_states:
+            features = extract_hidden_states(features)
+
         outputs = self.vlhead(image_features=features)
         image_features = outputs["image_features"]
         if return_encoded:
@@ -328,18 +336,25 @@ class SAILModel(nn.Module):
         normalize: bool = False,
         is_pre_encoded: bool = False,
         return_encoded: bool = False,
-    ):
-        if is_pre_encoded:
-            features = text
-        else:
-            if isinstance(text, str):
-                features = self.text_model.get_sentence_embeddings([text])
-            elif hasattr(self.text_model.model, 'config') and 'NV' in self.text_model.model.config.name_or_path:
-                features = self.text_model.model.encode(text_list, max_length=1024).half()
-            elif 'clip' in self.text_model.model_name:
-                features = self.text_model.get_sentence_embeddings(text_list)
+    ):        
+        if self.hidden_states:
+            if is_pre_encoded:
+                features = text
             else:
-                features = self.text_model(text)
+                features = self.text_model.get_sentence_embeddings(text_list)
+                features = extract_hidden_states(features)
+        else:
+            if is_pre_encoded:
+                features = text
+            else:
+                if isinstance(text, str):
+                    features = self.text_model.get_sentence_embeddings([text])
+                elif hasattr(self.text_model.model, 'config') and 'NV' in self.text_model.model.config.name_or_path:
+                    features = self.text_model.model.encode(text_list, max_length=1024).half()
+                elif 'clip' in self.text_model.model_name:
+                    features = self.text_model.get_sentence_embeddings(text_list)
+                else:
+                    features = self.text_model(text)
                 
         outputs = self.vlhead(text_features=features)
         text_features = outputs["text_features"]
@@ -430,7 +445,7 @@ if __name__ == "__main__":
     )
     
     print(model)
-    # 假设输入图像和文本特征
+    # 假设输入图像和文本特征F
     image_features = torch.randn(1, 2048)  
     text_features = torch.randn(1, 1024)   
 

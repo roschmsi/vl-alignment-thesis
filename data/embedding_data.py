@@ -24,27 +24,42 @@ def custom_collate_fn(batch):
     else:
         return text_vectors, image_vectors
 
-def load_vectors(embedding_list: list[str]) -> list[torch.Tensor]:
+def extract_hidden_states(features):
+        n_layers = features.size(2)
+        third = n_layers // 3
+
+        idx1 = third
+        idx2 = 2 * third
+
+        features = features[:, :, [idx1, idx2, -1]]
+        features = torch.flatten(features, start_dim=1, end_dim=2)
+
+        return features
+
+def load_vectors(embedding_list: list[str], hidden_states=False) -> list[torch.Tensor]:
     files = []
     for dir_path in embedding_list:
         files.extend(natsorted(glob.glob(os.path.join(dir_path, "*.pt"))))
     vectors = []
     # TODO reset debugging mode
-    # files = files[:100]
+    # files = files[:5000]
     for file in tqdm(files, desc="Loading embedding data", unit="file"):
-        vectors.extend(torch.load(file, weights_only=True).to(torch.float16))
+        features = torch.load(file, weights_only=True).to(torch.float16)
+        if hidden_states:
+            features = extract_hidden_states(features)
+        vectors.extend(features)
     return vectors
 
 class VLEmbeddingDataset(Dataset):
-    def __init__(self, text_embedding_list, image_embedding_list, extra_text_embedding_list=None, train_num_samples=None):
+    def __init__(self, text_embedding_list, image_embedding_list, extra_text_embedding_list=None, train_num_samples=None, hidden_states=False):
 
-        self.text_vectors, self.image_vectors = self._load_image_text_vectors(image_embedding_list, text_embedding_list)
+        self.text_vectors, self.image_vectors = self._load_image_text_vectors(image_embedding_list, text_embedding_list, hidden_states)
         n_img, n_txt = len(self.image_vectors), len(self.text_vectors)
         assert n_img > 0 and n_txt > 0 and n_txt % n_img == 0, f"text vectors length ({n_txt}) is not a multiple of image vectors length ({n_img})"
 
         if extra_text_embedding_list:
             print(f"Loading extra text vectors from {extra_text_embedding_list}")
-            self.extra_text_vectors, _ = self._load_image_text_vectors(text_embedding_list = extra_text_embedding_list)
+            self.extra_text_vectors, _ = self._load_image_text_vectors(text_embedding_list = extra_text_embedding_list, hidden_states=hidden_states)
             assert len(self.extra_text_vectors) == len(self.text_vectors), f"extra text vectors length {len(self.extra_text_vectors)} is not equal to text vectors length {len(self.text_vectors)}"
     
         if train_num_samples is not None:
@@ -62,14 +77,14 @@ class VLEmbeddingDataset(Dataset):
         self.visual_dim = self.image_vectors[0].shape[0]
         self.text_dim = self.text_vectors[0].shape[0]
         
-    def _load_image_text_vectors(self, image_embedding_list = None, text_embedding_list = None):
+    def _load_image_text_vectors(self, image_embedding_list = None, text_embedding_list = None, hidden_states=False):
         assert image_embedding_list is not None or text_embedding_list is not None, "Either image_embedding_list or text_embedding_list must be provided"
         if image_embedding_list is not None:
-            image_vectors = load_vectors(image_embedding_list)
+            image_vectors = load_vectors(image_embedding_list, hidden_states)
         else:
             image_vectors = []
         if text_embedding_list is not None:
-            text_vectors = load_vectors(text_embedding_list)
+            text_vectors = load_vectors(text_embedding_list, hidden_states)
         else:
             text_vectors = []
         return text_vectors, image_vectors
@@ -88,6 +103,100 @@ class VLEmbeddingDataset(Dataset):
             return self.text_vectors[idx], self.image_vectors[img_idx], self.extra_text_vectors[idx]
         else:
             return self.text_vectors[idx], self.image_vectors[img_idx]
+
+
+def batched_collate_fn(batch):
+    """
+    Collate function for BatchedLazyDataset.
+    It receives a list of (text_batch, image_batch) tuples and concatenates them.
+    """
+    if len(batch[0]) == 3:
+        text_batches, image_batches, extra_text_batches = zip(*batch)
+        final_text = torch.cat(text_batches, dim=0)
+        final_images = torch.cat(image_batches, dim=0)
+        final_extra_text = torch.cat(extra_text_batches, dim=0)
+        return final_text, final_images, final_extra_text
+    else:
+        text_batches, image_batches = zip(*batch)
+        final_text = torch.cat(text_batches, dim=0)
+        final_images = torch.cat(image_batches, dim=0)
+        return final_text, final_images
+
+
+def batched_collate_fn(batch):
+    if len(batch[0]) == 3:
+        text_batches, image_batches, extra_text_batches = zip(*batch)
+        final_text = torch.cat(text_batches, dim=0)
+        final_images = torch.cat(image_batches, dim=0)
+        final_extra_text = torch.cat(extra_text_batches, dim=0)
+        return final_text, final_images, final_extra_text
+    else:
+        text_batches, image_batches = zip(*batch)
+        final_text = torch.cat(text_batches, dim=0)
+        final_images = torch.cat(image_batches, dim=0)
+        return final_text, final_images
+
+
+class BatchedLazyDataset(Dataset):
+    """
+    I/O-efficient Dataset that loads entire pre-batched files.
+    Shuffling is at the file-level.
+    """
+    def __init__(self, text_files, image_files, extra_text_files=None, hidden_states=False):
+        self.text_files = text_files
+        self.image_files = image_files
+        self.extra_text_files = extra_text_files
+        self.hidden_states = hidden_states
+
+        assert len(self.text_files) > 0, "No text embedding files found."
+        assert len(self.text_files) == len(self.image_files), "Mismatch in number of text and image files"
+        if self.extra_text_files:
+            assert len(self.extra_text_files) == len(self.text_files), "Mismatch in number of extra text and text files"
+
+    def __len__(self):
+        return len(self.text_files)
+
+    def __getitem__(self, idx):
+        text_file_path = self.text_files[idx]
+        image_file_path = self.image_files[idx]
+        
+        text_batch = torch.load(text_file_path, weights_only=True).to(torch.float16)
+        image_batch = torch.load(image_file_path, weights_only=True).to(torch.float16)
+
+        if self.hidden_states:
+            text_batch = extract_hidden_states(text_batch)
+            image_batch = extract_hidden_states(image_batch)
+
+        if self.extra_text_files:
+            extra_text_file_path = self.extra_text_files[idx]
+            extra_text_batch = torch.load(extra_text_file_path, weights_only=True).to(torch.float16)
+            if self.hidden_states:
+                extra_text_batch = extract_hidden_states(extra_text_batch)
+            return text_batch, image_batch, extra_text_batch
+        else:
+            return text_batch, image_batch
+
+    def get_total_samples(self):
+        total_samples = 0
+        for file_path in tqdm(self.text_files, desc="Calculating total samples"):
+            tensor_info = torch.load(file_path, map_location='cpu', weights_only=True)
+            total_samples += tensor_info.shape[0]
+        return total_samples
+        
+    def get_dimensions(self):
+        # Load the first file of each type to determine dimensions
+        text_batch_sample = torch.load(self.text_files[0], map_location='cpu', weights_only=True)
+        if self.hidden_states:
+            text_batch_sample = extract_hidden_states(text_batch_sample)
+        text_dim = text_batch_sample.shape[-1]
+        
+        image_batch_sample = torch.load(self.image_files[0], map_location='cpu', weights_only=True)
+        if self.hidden_states:
+            image_batch_sample = extract_hidden_states(image_batch_sample)
+        visual_dim = image_batch_sample.shape[-1]
+        
+        return visual_dim, text_dim
+
 
 if __name__ == "__main__":
 

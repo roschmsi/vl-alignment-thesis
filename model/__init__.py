@@ -5,6 +5,7 @@ from .language_model import SentenceEmbedding
 from typing import Union, Optional
 import torch
 import os
+import pdb
 
 
 def get_input_dtype(precision: str):
@@ -61,6 +62,7 @@ def create_model(
             agg_mode=agg_mode,
             width_factor=width_factor,
             sharelock=sharelock,
+            hidden_states=hidden_states,
         )
     else:
        model = LayerClass(

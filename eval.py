@@ -10,6 +10,7 @@ import argparse
 from model import create_model
 import os
 import yaml
+import pdb
 
 
 def parse_args():
@@ -116,6 +117,12 @@ def parse_args():
         action="store_true",
         help="Use sharelock.",
     )
+    parser.add_argument(
+        "--hidden_states",
+        default=False,
+        action="store_true",
+        help="Use hidden states for alignment.",
+    )
     args = parser.parse_args()
 
     # Overide args with model_config.yaml
@@ -160,6 +167,7 @@ def main(args):
         agg_mode=args.agg_mode,
         sharelock=args.sharelock,
         width_factor=args.width_factor,
+        hidden_states=args.hidden_states,
     )
     text_model_name = args.text_model.split("/")[-1]
     vision_model_name = args.vision_model.split("/")[-1]

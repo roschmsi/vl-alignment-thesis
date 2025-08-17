@@ -70,7 +70,7 @@ class SentenceEmbedding(nn.Module):
         if self.output_hidden_states:
             with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):
                 inputs = self.tokenizer(
-                    sentences, padding=True, truncation=True, return_tensors="pt"
+                    text=sentences, padding=True, truncation=True, return_tensors="pt"
                 ).to(self.device)
 
                 if 'NV' in self.model_name:
