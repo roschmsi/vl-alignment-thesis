@@ -26,7 +26,7 @@ text_model="nvidia/NV-Embed-v2"
 #==============================================================================#
 #                                 DATA                                           #
 #==============================================================================#
-data="dreamclipcc3m"
+data="dreamclipcc12m"
 # Available options:
 # data="dreamclipcc3m"      # DreamCLIP CC-3M
 # data="dreamclipcc12mhf"  # DreamCLIP CC-12M high-fidelity
@@ -37,7 +37,7 @@ data="dreamclipcc3m"
 #                         image or text encoding                                #
 #==============================================================================#
 
-domain="text" # "image" or "text", each time we only encode one modality
+domain="image" # "image" or "text", each time we only encode one modality
 
 #==============================================================================#
 #                             BATCH SIZE                                         #
@@ -79,7 +79,7 @@ else
     echo "bash output: Using domain: $domain"
     echo "bash output: Using batch size: $batch_size"
     echo "bash output: Using source caption: $source_caption"
-    python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py \
+    python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode_wds.py \
     --domain $domain \
     --vision_model_name $vision_model \
     --text_model_name $text_model \
@@ -89,5 +89,9 @@ else
     --source_caption $source_caption \
     --agg_mode $agg_mode \
     --output_dir $output_dir \
-    --output_hidden_states
+    --output_hidden_states \
+    --downsample \
+    --num_workers 4 \
+    --start_shard_index 768
+    # --end_shard_index 767
 fi

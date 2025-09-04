@@ -30,6 +30,7 @@ class AlignmentLayer(nn.Module):
         only_vision: bool = False,
         width_factor: int = 8,
         hidden_states = False,
+        reconstruction = False
     ):
         super(AlignmentLayer, self).__init__()
         assert only_vision or text_dimension is not None, "text_dimension must be provided if only_vision is False"
@@ -59,6 +60,20 @@ class AlignmentLayer(nn.Module):
         self._initialize_weights(logit_scale, logit_bias)
 
         self.hidden_states = hidden_states
+        self.reconstruction = reconstruction
+
+        # pdb.set_trace()
+
+        if self.reconstruction:
+            self.reconstruction_head = ReconstructionHead(
+                vision_dimension = vision_dimension ,
+                text_dimension = text_dimension,
+                target_dimension = target_dimension,
+                linear_type = linear_type,
+                cast_dtype = cast_dtype,
+                width_factor = width_factor,
+                hidden_states=hidden_states,
+            )
 
     def _initialize_weights(self, scale: float, bias: float):
 
@@ -123,7 +138,7 @@ class AlignmentLayer(nn.Module):
         else:
             logits_per_text = None
 
-        return {
+        return_dict = {
             "image_features": image_features,
             "text_features": text_features,
             "extra_text_features": extra_text_features,
@@ -131,6 +146,18 @@ class AlignmentLayer(nn.Module):
             "logit_scale": self.logit_scale.exp(),
             "logit_bias": self.logit_bias
         }
+
+        if self.reconstruction:
+            reconstructed = self.reconstruction_head(
+                image_features=image_features, 
+                text_features=text_features,
+            )
+            return_dict.update({
+                "reconstructed_image_features": reconstructed["reconstructed_image_features"],
+                "reconstructed_text_features": reconstructed["reconstructed_text_features"],
+            })
+
+        return return_dict
 
 class ShareLockAlignmentLayer(nn.Module):
     def __init__(
@@ -211,6 +238,81 @@ class ShareLockAlignmentLayer(nn.Module):
             "logit_scale": self.get_logit_scale,
             "logit_bias": self.get_logit_bias
         }
+
+
+class ReconstructionHead(nn.Module):
+    def __init__(
+        self,
+        vision_dimension: int,
+        text_dimension: int = None,
+        target_dimension: int = 1024,
+        linear_type: str = "star",
+        cast_dtype: Optional[torch.dtype] = None,
+        logit_scale: float = 10.0,
+        logit_bias: float = -10.0,
+        only_vision: bool = False,
+        width_factor: int = 8,
+        hidden_states = False,
+    ):
+        super(ReconstructionHead, self).__init__()
+        assert only_vision or text_dimension is not None, "text_dimension must be provided if only_vision is False"
+
+        self.cast_dtype = cast_dtype
+        self.linear_type = linear_type
+        if linear_type == "star":
+            LinearLayer = partial(StarMLP, width_factor=width_factor, activation=nn.ReLU6())
+        elif linear_type == "mlp":
+            LinearLayer = SiglipMLP
+        else:
+            LinearLayer = nn.Linear
+
+        # TODO add norm before reconstruction
+
+        self.vision_reconstruction_head = LinearLayer(
+            target_dimension, vision_dimension
+        )
+
+        self.text_reconstruction_head = LinearLayer(
+            target_dimension, text_dimension,
+        )
+
+        self.logit_scale = nn.Parameter(torch.randn(1))
+        self.logit_bias = nn.Parameter(torch.randn(1))
+        self._initialize_weights(logit_scale, logit_bias)
+
+    def _initialize_weights(self, scale: float, bias: float):
+
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.LayerNorm):
+                torch.nn.init.ones_(module.weight)
+                torch.nn.init.zeros_(module.bias)
+
+        # Initialize logit_scale and logit_bias
+        logit_scale_init = torch.log(torch.tensor(scale))                           
+        self.logit_scale.data.fill_(logit_scale_init)
+        self.logit_bias.data.fill_(torch.tensor(bias))
+    
+    @property
+    def get_logit_scale(self):
+        return self.logit_scale.exp()
+    
+    @property
+    def get_logit_bias(self):
+        return self.logit_bias
+            
+    def forward(self, image_features, text_features):
+        reconstructed_image_features = self.vision_reconstruction_head(image_features)
+
+        reconstructed_text_features = self.text_reconstruction_head(text_features)
+
+        return {
+            "reconstructed_image_features": reconstructed_image_features,
+            "reconstructed_text_features": reconstructed_text_features,
+        }
         
 
 class SAILModel(nn.Module):
@@ -227,7 +329,6 @@ class SAILModel(nn.Module):
         width_factor: int = 8,
         sharelock: bool = False,
         hidden_states=False,
-        reconstruction=False,
     ):
         super(SAILModel, self).__init__()
         self.text_model = SentenceEmbedding(text_model_name, output_hidden_states=hidden_states)
@@ -258,19 +359,6 @@ class SAILModel(nn.Module):
         )
         if vlhead_weights_path is not None:
             self.load_vlhead_weights(vlhead_weights_path)
-
-        self.reconstruction = reconstruction
-
-        if self.reconstruction:
-            self.reconstruction_head = ReconstructionHead(
-                vision_dimension = vision_dimension ,
-                text_dimension = text_dimension,
-                target_dimension = target_dimension,
-                linear_type = linear_type,
-                cast_dtype = cast_dtype,
-                width_factor = width_factor,
-                hidden_states=hidden_states,
-            )
 
         self.hidden_states = hidden_states
 
@@ -309,8 +397,6 @@ class SAILModel(nn.Module):
         attetion_type: str = 'qk',
         ignore_residual: bool = False,
     ):
-        # pdb.set_trace()
-
         if is_pre_encoded:
             features = image
         else:
@@ -413,24 +499,22 @@ class SAILModel(nn.Module):
             * self.vlhead.logit_scale.exp()
             + self.vlhead.logit_bias
         )
+
+        return_dict = {
+            "image_features": norm_image_features,
+            "text_features": norm_text_features,
+            "logits_per_text": logits_per_text,
+            "logit_scale": self.vlhead.get_logit_scale,
+            "logit_bias": self.vlhead.get_logit_bias,
+        }
+
         if return_encoded:
-            return {
-                "image_features": norm_image_features,
-                "text_features": norm_text_features,
-                "logits_per_text": logits_per_text,
-                "logit_scale": self.vlhead.get_logit_scale,
-                "logit_bias": self.vlhead.get_logit_bias,
+            return_dict.update({
                 "encoded_image_features": encoded_image_features,
                 "encoded_text_features": encoded_text_features,
-            }
-        else:
-            return {
-                "image_features": norm_image_features,
-                "text_features": norm_text_features,
-                "logits_per_text": logits_per_text,
-                "logit_scale": self.vlhead.get_logit_scale,
-                "logit_bias": self.vlhead.get_logit_bias,
-            }
+            })
+
+        return return_dict
 
 if __name__ == "__main__":
     import torch

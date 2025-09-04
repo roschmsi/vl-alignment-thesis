@@ -36,18 +36,26 @@ def extract_hidden_states(features):
 
         return features
 
-def load_vectors(embedding_list: list[str], hidden_states=False) -> list[torch.Tensor]:
+def load_vectors(embedding_list: list[str], hidden_states: bool = False) -> list[torch.Tensor]:
     files = []
     for dir_path in embedding_list:
         files.extend(natsorted(glob.glob(os.path.join(dir_path, "*.pt"))))
-    vectors = []
-    # TODO reset debugging mode
-    # files = files[:5000]
-    for file in tqdm(files, desc="Loading embedding data", unit="file"):
-        features = torch.load(file, weights_only=True).to(torch.float16)
-        if hidden_states:
-            features = extract_hidden_states(features)
-        vectors.extend(features)
+
+    vectors: list[torch.Tensor] = []
+
+    with torch.no_grad():
+        for file in tqdm(files, desc="Loading embedding data", unit="file"):
+            feats = torch.load(file, map_location='cpu', weights_only=True).to(torch.float16)
+
+            if hidden_states:
+                feats = extract_hidden_states(feats)
+            else:
+                feats = feats[:, :, -1]
+            
+            feats = feats.contiguous()
+            vectors.extend([x.clone() for x in feats.unbind(0)])
+            del feats
+
     return vectors
 
 class VLEmbeddingDataset(Dataset):
@@ -166,21 +174,29 @@ class BatchedLazyDataset(Dataset):
         if self.hidden_states:
             text_batch = extract_hidden_states(text_batch)
             image_batch = extract_hidden_states(image_batch)
+        else:
+            # take the final representation
+            text_batch = text_batch[:, :, -1]
+            image_batch = image_batch[:, :, -1]
 
         if self.extra_text_files:
             extra_text_file_path = self.extra_text_files[idx]
             extra_text_batch = torch.load(extra_text_file_path, weights_only=True).to(torch.float16)
             if self.hidden_states:
                 extra_text_batch = extract_hidden_states(extra_text_batch)
+            # TODO return the final representation if hidden_states == False
             return text_batch, image_batch, extra_text_batch
         else:
             return text_batch, image_batch
 
     def get_total_samples(self):
-        total_samples = 0
-        for file_path in tqdm(self.text_files, desc="Calculating total samples"):
-            tensor_info = torch.load(file_path, map_location='cpu', weights_only=True)
-            total_samples += tensor_info.shape[0]
+        if len(self.text_files) == 0:
+            return 0
+        total_samples = (len(self.text_files) - 1) * 32
+        total_samples += torch.load(self.text_files[-1]).shape[0]
+        # for file_path in tqdm(self.text_files, desc="Calculating total samples"):
+        #     tensor_info = torch.load(file_path, map_location='cpu', weights_only=True)
+        #     total_samples += tensor_info.shape[0]
         return total_samples
         
     def get_dimensions(self):
@@ -188,11 +204,15 @@ class BatchedLazyDataset(Dataset):
         text_batch_sample = torch.load(self.text_files[0], map_location='cpu', weights_only=True)
         if self.hidden_states:
             text_batch_sample = extract_hidden_states(text_batch_sample)
+        else:
+            text_batch_sample = text_batch_sample[:, :, -1]
         text_dim = text_batch_sample.shape[-1]
         
         image_batch_sample = torch.load(self.image_files[0], map_location='cpu', weights_only=True)
         if self.hidden_states:
             image_batch_sample = extract_hidden_states(image_batch_sample)
+        else:
+            image_batch_sample = image_batch_sample[:, :, -1]
         visual_dim = image_batch_sample.shape[-1]
         
         return visual_dim, text_dim

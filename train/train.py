@@ -99,11 +99,25 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
             extra_texts = extra_texts.to(device=device, dtype=input_dtype, non_blocking=True)
         data_time_m.update(time.time() - end)
         optimizer.zero_grad()
+
         with autocast():
             model_out = model(images, texts, extra_texts)
             logit_scale = model_out["logit_scale"]
             losses = loss(**model_out, output_dict=True)
             total_loss = losses['contrastive_loss']
+
+            if args.reconstruction:
+                reconstructed_image_features = model_out["reconstructed_image_features"]
+                reconstructed_text_features = model_out["reconstructed_text_features"]
+                
+                image_recon_loss = F.mse_loss(reconstructed_image_features, images)
+                text_recon_loss = F.mse_loss(reconstructed_text_features, texts)
+                total_recon_loss = image_recon_loss + text_recon_loss
+                losses.update({
+                    "reconstruction loss": total_recon_loss,
+                })
+
+                total_loss += args.reconstruction_alpha * total_recon_loss
 
         backward(total_loss, scaler)
 

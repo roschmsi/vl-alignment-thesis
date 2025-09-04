@@ -170,7 +170,7 @@ class ImageEmbedding(nn.Module):
                 outputs = self.model.forward_features(inputs['pixel_values'])
         else:
             if isinstance(inputs, torch.Tensor):
-                outputs = self.model(inputs)
+                outputs = self.model(inputs, output_hidden_states=self.output_hidden_states)
             elif isinstance(inputs, dict) or isinstance(inputs, BaseBatchFeature):
                 if any(x in self.model_name.lower() for x in ['ibot', 'dinov1', 'ml-aim', 'ijepa']):
                     outputs = self.model(inputs['pixel_values'])

@@ -166,6 +166,7 @@ def main(args):
         width_factor = args.width_factor,
         sharelock = args.sharelock,
         hidden_states = args.hidden_states,
+        reconstruction=args.reconstruction,
         **model_kwargs
     )
     # print trainanble parameters

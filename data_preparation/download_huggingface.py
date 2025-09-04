@@ -2,8 +2,8 @@ from huggingface_hub import snapshot_download
 import os
 
 # Define the repository ID and the local directory to save files
-repo_id = "pixparse/cc12m-wds"
-local_dir = "/dss/mcmlscratch/07/ga27tus3/pixparse/cc12m"
+repo_id = "pixparse/cc3m-wds"
+local_dir = "/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m"
 
 print(f"Downloading shards from {repo_id} to {local_dir}...")
 

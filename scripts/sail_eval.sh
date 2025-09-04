@@ -23,12 +23,12 @@ vision_model="facebook/dinov2-large"
 text_model="nvidia/NV-Embed-v2"
 # ------------------------------------------------------------ 
   
-CKPT="/dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs/sail_dinov2l_nv2_cc3m/checkpoints/epoch_98.pt" # path to the checkpoint .pt file, make sure the vision and text model match the checkpoint
+CKPT="/dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs/sail_dinov2l_nv2_cc12m_full_hidden_bs_32768/checkpoints/epoch_6.pt" # path to the checkpoint .pt file, make sure the vision and text model match the checkpoint
 DATASET_ROOT_DIR="/dss/mcmlscratch/07/ga27tus3/data"
 
 
 # imagenetv1 COCO winoground MMVP
-for task in imagenetv1
+for task in imagenetv1 COCO winoground
 do
     # check if the checkpoint exists
     if [ ! -f $checkpoint_path ]; then
@@ -48,4 +48,5 @@ do
         --seg_task_config evaluation/ClearCLIP/configs/cfg_coco_stuff164k_SAIL.py \
         --agg_mode concat \
         --width_factor 8
+        # --hidden_states
 done

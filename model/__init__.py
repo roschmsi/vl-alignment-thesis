@@ -44,6 +44,7 @@ def create_model(
         width_factor: int = 8,
         sharelock: bool = False,
         hidden_states: bool = False,
+        reconstruction: bool = False,
 ):  
     if isinstance(device, str):
         device = torch.device(device)
@@ -75,6 +76,7 @@ def create_model(
             logit_bias=logit_bias, 
             width_factor=width_factor,
             hidden_states=hidden_states,
+            reconstruction=reconstruction,
         )
     model.to(device=device)
     return model

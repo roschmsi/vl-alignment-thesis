@@ -1,7 +1,7 @@
 #!/bin/bash
 # ----------------------TRAIN SETTING------------------------
 
-epoch_num=100
+epoch_num=30
 lr=1e-5
 bs=32768
 d=1024
@@ -14,9 +14,9 @@ logit_bias=-10
 # extra_text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_shortSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_longSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_shortSV_captions"
 # output_name="sail_l_nv2_merged23m"
 
-text_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_longSV_captions" 
-image_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/image_embedding/dinov2-large/dreamclipcc3m_concat"
-output_name="sail_dinov2l_nv2_cc3m_hidden"
+text_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12m_longSV_captions" 
+image_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/image_embedding/dinov2-large/dreamclipcc12m_concat"
+output_name="sail_dinov2l_nv2_cc12m_full_bs_32768_clone"
 # ------------------------------------------------------------
 
 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
@@ -42,10 +42,10 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --name $output_name \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
-    --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs \
-    --hidden_states
-
-
+    --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs
+    # --hidden_states \
+    # --reconstruction \
+    # --reconstruction_alpha 0.00005
 
 if [ $? -ne 0 ]; then
     echo "Training failed. Checking for checkpoints..."

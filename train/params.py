@@ -573,6 +573,17 @@ def parse_args(args):
         action="store_true",
         help='Use hidden states for alignment.'
     )
+    parser.add_argument(
+        "--reconstruction",
+        default=False,
+        action="store_true",
+        help='Reconstruct features to preserve information.'
+    )
+    parser.add_argument(
+        "--reconstruction_alpha",
+        type=float,
+        help='Weight to balance contrastive and reconstruction loss.'
+    )
 
     args = parser.parse_args(args)
 

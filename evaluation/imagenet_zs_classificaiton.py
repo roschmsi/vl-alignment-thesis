@@ -194,28 +194,28 @@ def imagenet_eval(
         text_model_name,
     )
 
-    if not os.path.exists(save_backbone_features_path):
-        print("Extracting backbone features")
-        if version == "v1":
-            images_dataset = ImageNetWithPaths(
-                root=images_dir, split="val", transform=processor
-            )
-        else:
-            images_dataset = ImageNetV2Dataset(
-            variant="matched-frequency", transform=processor, location=images_dir
-        )
-        loader = torch.utils.data.DataLoader(
-            images_dataset, batch_size=bs, num_workers=2
-        )
-        top1, top5, n = extract_and_save_backbone_features(
-            model, device, loader, save_backbone_features_path, zeroshot_weights
+    # if not os.path.exists(save_backbone_features_path):
+    print("Extracting backbone features")
+    if version == "v1":
+        images_dataset = ImageNetWithPaths(
+            root=images_dir, split="val", transform=processor
         )
     else:
-        print(f"Loading backbone image features from {save_backbone_features_path}")
-        pre_encode_image_features = load_features(save_backbone_features_path)
-        top1, top5, n = evaluate_from_saved_features(
-            model, device, pre_encode_image_features, bs, zeroshot_weights
-        )
+        images_dataset = ImageNetV2Dataset(
+        variant="matched-frequency", transform=processor, location=images_dir
+    )
+    loader = torch.utils.data.DataLoader(
+        images_dataset, batch_size=bs, num_workers=2
+    )
+    top1, top5, n = extract_and_save_backbone_features(
+        model, device, loader, save_backbone_features_path, zeroshot_weights
+    )
+    # else:
+    #     print(f"Loading backbone image features from {save_backbone_features_path}")
+    #     pre_encode_image_features = load_features(save_backbone_features_path)
+    #     top1, top5, n = evaluate_from_saved_features(
+    #         model, device, pre_encode_image_features, bs, zeroshot_weights
+    #     )
 
     top1 = (top1 / n) * 100
     top5 = (top5 / n) * 100
