@@ -150,6 +150,12 @@ class ImageEmbedding(nn.Module):
             with torch.no_grad():
                 return self.forward(inputs)
 
+    def get_visual_embeddings_from_pil_list(self, images):
+        inputs = self.image_processor(images, return_tensors="pt").to(self.device, dtype=self.model.dtype)
+        with torch.autocast(device_type=self.device, dtype=self.model.dtype):
+            with torch.no_grad():
+                return self.forward(inputs)
+
     def forward(self, inputs, patch_mode=False, attetion_type='qk', ignore_residual=False):
         """
         Get embeddings from the vision encoder.
@@ -182,9 +188,11 @@ class ImageEmbedding(nn.Module):
             
         # extract the embeddings
         if self.output_hidden_states:
-            embedding = torch.stack(outputs['hidden_states']).permute(1, 2, 3, 0)
+            embedding = torch.stack(outputs['hidden_states'][:-1]).permute(1, 2, 3, 0)
+            embedding= torch.cat([embedding, outputs['last_hidden_state'].unsqueeze(-1)], dim=-1)
             cls_token = embedding[:, 0]
             patch_tokens = embedding[:, 1:]
+
             if self.agg_mode == 'patch':
                 embedding = patch_tokens.mean(dim=1)
             elif self.agg_mode == 'cls':
@@ -223,6 +231,21 @@ class ImageEmbedding(nn.Module):
                             embedding = torch.cat([cls_token, patch_tokens.mean(dim=1)], dim=1)
                         else:
                             raise ValueError(f"Invalid agg_mode: {self.agg_mode}")
+
+        # the below code was just for consistency with the evaluation pipeline
+        # outputs = self.model(**inputs, output_hidden_states=True)
+        # embedding = torch.stack(outputs['hidden_states']).permute(1, 2, 3, 0)
+        # cls_token = embedding[:, 0]
+        # patch_tokens = embedding[:, 1:]
+        # if self.agg_mode == 'patch':
+        #     embedding = patch_tokens.mean(dim=1)
+        # elif self.agg_mode == 'cls':
+        #     embedding = cls_token
+        # elif self.agg_mode == 'concat':
+        #     embedding = torch.cat([cls_token, patch_tokens.mean(dim=1)], dim=1)
+        # else:
+        #     raise ValueError(f"Invalid agg_mode: {self.agg_mode}")
+        # embedding = embedding[..., -1]
 
         return embedding
 

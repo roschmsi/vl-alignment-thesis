@@ -4,6 +4,7 @@ from transformers import AutoTokenizer, AutoModel, CLIPTextModel
 import torch.nn as nn
 from typing import List, Dict, Any, Tuple, Optional, Union
 import pdb
+import importlib
 
 
 def get_embedding_strategy(model_name):
@@ -56,37 +57,85 @@ class SentenceEmbedding(nn.Module):
         else:
             self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True, device_map=self.device).half()
         self.output_hidden_states = output_hidden_states
+
+        #
+        mod = importlib.import_module(self.model.__class__.__module__)
+        self.input_transform_func = getattr(mod, "input_transform_func")
     
     def mean_pooling(self, model_output: torch.Tensor, attention_mask):
         token_embeddings = model_output[0]  # First element of model_output contains all token embeddings
         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
-    def _pool_tokens(self, token_embeddings: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        mask = attention_mask.unsqueeze(-1).expand_as(token_embeddings).float()
-        return (token_embeddings * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+    def pool_tokens_per_layer(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        B = hidden_states.shape[0]
+        hidden_states = hidden_states.permute(3, 0, 1, 2)
+        attention_mask = attention_mask.to(hidden_states.dtype)
+        numer = torch.einsum("lbtd,bt->lbd", hidden_states, attention_mask)     # sum over tokens
+        denom = attention_mask.sum(dim=1).clamp_min(1e-9).view(1, B, 1)  # (1,B,1)
+        hidden_states_mean = numer / denom
+        return hidden_states_mean
     
     def get_sentence_embeddings(self, sentences: List[str]):
         if self.output_hidden_states:
             with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):
-                inputs = self.tokenizer(
-                    text=sentences, padding=True, truncation=True, return_tensors="pt"
-                ).to(self.device)
 
                 if 'NV' in self.model_name:
-                    enc_out = self.model.embedding_model(
-                        **inputs, output_hidden_states=True, return_dict=True
+
+                    # embeddings = self.model.encode(sentences, max_length=1024).half()
+                    batch_dict = self.input_transform_func(
+                        self.model.tokenizer,
+                        {"input_texts": [prompt for prompt in sentences]},
+                        always_add_eos=True,
+                        max_length=1024,
+                        instruction=""
                     )
+
+                    features = self.model.prepare_kwargs_from_batch(
+                        batch_dict, instruction_lens=0, device=self.model.device
+                    )
+
+                    outputs = self.model.embedding_model(
+                        input_ids=features['input_ids'],
+                        attention_mask=features['attention_mask'],
+                        output_hidden_states=True,
+                        return_dict=True,
+                    )
+
+                    embeds = self.model.latent_attention_model(
+                        outputs.last_hidden_state,
+                        features['pool_mask'],
+                    )
+
+                    hidden_states = outputs.hidden_states
+                    hidden_states = torch.stack(hidden_states[:-1], dim=-1)
+
+                    # pool mask and attention mask are the same
+                    # TODO still check if aggregation is correct
+                    hidden_states = self.pool_tokens_per_layer(hidden_states, features["attention_mask"]).half()
+
+                    embeds = embeds.unsqueeze(0)
+                    combined = torch.cat([hidden_states, embeds], dim=0)
+                    combined = combined.permute(1, 2, 0)
+
+                    return combined
+
                 else:
-                    enc_out = self.model(
-                        **inputs, output_hidden_states=True, return_dict=True
-                    )
 
-            hidden_states = enc_out.hidden_states
-            pooled_layers = [self._pool_tokens(hs, inputs['attention_mask']) for hs in hidden_states]
-            stacked = torch.stack(pooled_layers, dim=-1)
+                    raise ValueError('Not implemented')
 
-            return stacked.half()
+                # inputs = self.tokenizer(
+                #     text=sentences, padding=True, truncation=True, return_tensors="pt"
+                # ).to(self.device)
+                
+                # if 'NV' in self.model_name:
+                #     enc_out = self.model.embedding_model(
+                #         **inputs, output_hidden_states=True, return_dict=True
+                #     )
+                # else:
+                #     enc_out = self.model(
+                #         **inputs, output_hidden_states=True, return_dict=True
+                #     )
 
         else:
             # Tokenize sentences

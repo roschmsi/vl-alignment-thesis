@@ -223,20 +223,6 @@ def encode_text(args, sentences, start_index):
     )
 
 
-# @torch.no_grad()
-# def encode_image(args, image_paths, start_index):
-#     model_name = args.vision_model_name.split('/')[-1]
-#     output_dir = os.path.join('./data/tensor_data/image_embedding', model_name, args.data + '_' + args.agg_mode)
-#     if not args.resume and os.path.exists(output_dir):
-#         logging.info(f'{output_dir} already exists, skipping...')
-#         exit()
-#     model = ImageEmbedding(args.vision_model_name, agg_mode=args.agg_mode)
-#     model = model.half().to('cuda')  # Move model to GPU and convert to FP16
-#     model.eval()
-#     image_data_loader = create_image_dataloader(image_paths, model.image_processor, batch_size=args.batch_size, num_workers=4, shuffle=False)
-#     process_batch_image(image_data_loader, model, start_index, args.batch_size, output_dir, args.resume, args.throughput)
-
-
 @torch.no_grad()
 def encode_image(args, images, start_index):
     model_name = args.vision_model_name.split("/")[-1]

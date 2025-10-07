@@ -115,24 +115,6 @@ def encode_text(args, data_loader, start_index):
     process_batch_from_loader(data_loader, encode_function, start_index, args.batch_size, output_dir, args.resume, args.downsample, args.throughput)
 
 
-# @torch.no_grad()
-# def encode_image(args, data_loader, start_index):
-#     model_name = args.vision_model_name.split("/")[-1]
-#     output_dir = os.path.join(
-#         f"{args.output_dir}/tensor_data/image_embedding",
-#         model_name,
-#         f"{args.data}_{args.agg_mode}",
-#     )
-#     print(f"Output directory: {output_dir}")
-#     model = ImageEmbedding(args.vision_model_name, agg_mode=args.agg_mode, output_hidden_states=args.output_hidden_states)
-#     model = model.to("cuda")
-#     model.eval()
-#     def encode_function(batch_images):
-#         return model(batch_images)
-#     process_batch_from_loader(data_loader, encode_function, start_index, args.batch_size, output_dir, args.resume, args.downsample, args.throughput)
-
-# In encode_features.py
-
 @torch.no_grad()
 def encode_image(args, data_loader, start_index):
     model_name = args.vision_model_name.split("/")[-1]
@@ -152,22 +134,9 @@ def encode_image(args, data_loader, start_index):
     model = model.to("cuda")
     model.eval()
 
-    # This is the "glue" function that connects the DataLoader output to the model input
     def encode_function(batch_of_pil_images):
-        """
-        Takes a list of PIL Images, uses the model's own preprocessor,
-        and then performs inference.
-        """
-        # 1. Use the model's own preprocessor on the batch of PIL images
-        #    This performs resize, crop, ToTensor, and Normalize all at once.
-        #    The '.to(model.device)' is crucial if you have a GPU.
-        inputs = model.image_processor(batch_of_pil_images, return_tensors="pt").to(model.device)
-        
-        # 2. Pass the prepared tensor to the model's forward pass
-        #    Note: We are calling model() which is an alias for model.forward()
-        return model(inputs)
+        return model.get_visual_embeddings_from_pil_list(batch_of_pil_images)
 
-    # The rest of the logic is the same!
     process_batch_from_loader(
         data_loader, 
         encode_function, 
@@ -176,7 +145,7 @@ def encode_image(args, data_loader, start_index):
         output_dir, 
         args.resume, 
         args.downsample, 
-        args.throughput
+        args.throughput,
     )
 
 def load_data(data_path, source_caption, domain):
