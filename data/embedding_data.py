@@ -36,27 +36,26 @@ def extract_hidden_states(features):
 
         return features
 
-def load_vectors(embedding_list: list[str], hidden_states: bool = False) -> list[torch.Tensor]:
+def load_vectors(embedding_dirs: list[str], hidden_states: bool = False,
+                      dtype: torch.dtype = torch.float16) -> torch.Tensor:
     files = []
-    for dir_path in embedding_list:
-        files.extend(natsorted(glob.glob(os.path.join(dir_path, "*.pt"))))
+    for d in embedding_dirs:
+        files.extend(natsorted(glob.glob(os.path.join(d, "*.pt"))))
 
-    vectors: list[torch.Tensor] = []
+    # TODO remove for full dataset
+    # files = files[:2000]
 
+    chunks = []
     with torch.no_grad():
         for file in tqdm(files, desc="Loading embedding data", unit="file"):
-            feats = torch.load(file, map_location='cpu', weights_only=True).to(torch.float16)
-
-            if hidden_states:
-                feats = extract_hidden_states(feats)
-            else:
-                feats = feats[:, :, -1]
-            
-            feats = feats.contiguous()
-            vectors.extend([x.clone() for x in feats.unbind(0)])
-            del feats
-
-    return vectors
+            x = torch.load(file, map_location="cpu", weights_only=True)  # [B, L, D] or [B, D]
+            x = extract_hidden_states(x) if hidden_states else x[..., -1]
+            if x.dtype is not dtype:
+                x = x.to(dtype)
+            # x = x.contiguous()  # only if you later require contiguous storage
+            x = x.clone()
+            chunks.append(x)      # keep as big blocks, not per-sample tensors
+    return torch.cat(chunks, dim=0)  # [N, D]
 
 class VLEmbeddingDataset(Dataset):
     def __init__(self, text_embedding_list, image_embedding_list, extra_text_embedding_list=None, train_num_samples=None, hidden_states=False):
@@ -111,6 +110,41 @@ class VLEmbeddingDataset(Dataset):
             return self.text_vectors[idx], self.image_vectors[img_idx], self.extra_text_vectors[idx]
         else:
             return self.text_vectors[idx], self.image_vectors[img_idx]
+
+
+class MMAPDataset(Dataset):
+    def __init__(self, text_embedding_path, image_embedding_path, metadata_path, extra_text_path=None, train_num_samples=None, hidden_states=False):
+        super().__init__()
+
+        metadata = torch.load(metadata_path)
+        self.num_samples = metadata['num_samples']
+        vision_shape = tuple(metadata['vision_shape'])
+        text_shape = tuple(metadata['text_shape'])
+        vision_dtype = np.dtype(metadata['vision_dtype'])
+        text_dtype = np.dtype(metadata['text_dtype'])
+
+        self.vision_reps = np.memmap(
+            vision_mmap_path, 
+            dtype=vision_dtype, 
+            mode='r',
+            shape=(self.num_samples, *vision_shape)
+        )
+        self.text_reps = np.memmap(
+            text_mmap_path, 
+            dtype=text_dtype, 
+            mode='r',
+            shape=(self.num_samples, *text_shape)
+        )
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        vision_rep = self.vision_reps[idx]
+        text_rep = self.text_reps[idx]
+        
+        return torch.from_numpy(vision_rep.copy()), torch.from_numpy(text_rep.copy())
+
 
 
 def batched_collate_fn(batch):

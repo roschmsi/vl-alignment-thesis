@@ -47,7 +47,7 @@ else:
                 text_ext = ext
                 break
 
-        pdb.set_trace()
+        # pdb.set_trace()
 
         if image:
             # --- Create the figure ---

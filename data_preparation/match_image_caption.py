@@ -58,6 +58,10 @@ def main():
         src_shard_pattern = f"{args.base_dir}/pixparse/cc12m/cc12m-train-{{0000..2175}}.tar"
         captions_csv_path = f"{args.base_dir}/cc12m_3long_3short_1raw_captions_url.csv"
         out_dir = f"{args.base_dir}/pixparse/cc12m_recaptioned"
+    elif args.dataset == "yfcc15m":
+        src_shard_pattern = f"{args.base_dir}/pixparse/cc12m/cc12m-train-{{0000..2175}}.tar"
+        captions_csv_path = f"{args.base_dir}/cc12m_3long_3short_1raw_captions_url.csv"
+        out_dir = f"{args.base_dir}/pixparse/cc12m_recaptioned"
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -90,14 +94,14 @@ def main():
                 metadata.update(new_captions_data)
                 sample['json'] = metadata
 
-                if args.source_caption is not None:
-                    if args.source_caption in new_captions_data:
-                        # sample['txt'] = new_captions_data[args.source_caption]
-                        updated_count += 1
-                        shard_writer.write(sample)
-                else:
-                    updated_count += 1
-                    shard_writer.write(sample)
+                # if args.source_caption is not None:
+                #     if args.source_caption in new_captions_data:
+                #         # sample['txt'] = new_captions_data[args.source_caption]
+                #         updated_count += 1
+                #         shard_writer.write(sample)
+                # else:
+                updated_count += 1
+                shard_writer.write(sample)
 
     print(f"Processed {total_count} total samples.")
     print(f"Found and updated metadata for {updated_count} samples.")

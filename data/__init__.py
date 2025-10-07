@@ -1,4 +1,4 @@
-from .embedding_data import VLEmbeddingDataset, custom_collate_fn, BatchedLazyDataset, batched_collate_fn
+from .embedding_data import VLEmbeddingDataset, MMAPDataset, custom_collate_fn, BatchedLazyDataset, batched_collate_fn
 from torch.utils.data.distributed import DistributedSampler
 from dataclasses import dataclass
 from multiprocessing import Value
@@ -50,6 +50,14 @@ def get_embedding_dataset(
         train_num_samples,
         hidden_states,
     )
+    # TODO setup dataset based on mmap for hidden representations
+    # dataset = MMAPDataset(
+    #     text_embedding_list,
+    #     image_embedding_list,
+    #     extra_text_embedding_list,
+    #     train_num_samples,
+    #     hidden_states,
+    # )
     num_samples = len(dataset)
     sampler = DistributedSampler(dataset) if distributed and is_train else None
     shuffle = is_train and sampler is None
