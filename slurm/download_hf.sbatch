@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --time=1:00:00
+#SBATCH --time=4:00:00
 #SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_download_hf.out
 #SBATCH -e /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_download_hf.err
 

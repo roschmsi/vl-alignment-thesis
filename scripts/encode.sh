@@ -8,11 +8,11 @@ vision_model="facebook/dinov2-large"
 # vision_model="ijepa-huge"                    # IJEPA
 # vision_model="openai/clip-vit-large-patch14" # OpenAI CLIP
 # vision_model="mae-base"                      # MAE
-# vision_model="dinov1-vitb16"                # DINOv1
-# vision_model="facebook/dinov2-large"        # DINOv2
-# vision_model="aim_1B"                       # AIM
-# vision_model="ibot-base"                    # iBOT
-# vision_model="aimv2-large-patch14-224"     # AIMv2
+# vision_model="dinov1-vitb16"                 # DINOv1
+# vision_model="facebook/dinov2-large"         # DINOv2
+# vision_model="aim_1B"                        # AIM
+# vision_model="ibot-base"                     # iBOT
+# vision_model="aimv2-large-patch14-224"       # AIMv2
 
 #==============================================================================#
 #                               TEXT MODEL                                       #
@@ -21,7 +21,7 @@ text_model="nvidia/NV-Embed-v2"
 # Available options:
 # text_model="Alibaba-NLP/gte-large-en-v1.5"          # GTE large
 # text_model="openai/clip-vit-large-patch14"          # CLIP
-# text_model="Alibaba-NLP/gte-Qwen2-1.5B-instruct"   # Qwen2
+# text_model="Alibaba-NLP/gte-Qwen2-1.5B-instruct"    # Qwen2
 
 #==============================================================================#
 #                                 DATA                                           #
@@ -29,15 +29,15 @@ text_model="nvidia/NV-Embed-v2"
 data="dreamclipcc12m"
 # Available options:
 # data="dreamclipcc3m"      # DreamCLIP CC-3M
-# data="dreamclipcc12mhf"  # DreamCLIP CC-12M high-fidelity
-# data="yfcc15m"           # DreamCLIP YFCC-15M
+# data="dreamclipcc12mhf"   # DreamCLIP CC-12M high-fidelity
+# data="yfcc15m"            # DreamCLIP YFCC-15M
 
 #==============================================================================#
 #                                DOMAIN                                         #
 #                         image or text encoding                                #
 #==============================================================================#
 
-domain="image" # "image" or "text", each time we only encode one modality
+domain="text" # "image" or "text", each time we only encode one modality
 
 #==============================================================================#
 #                             BATCH SIZE                                         #
@@ -51,7 +51,7 @@ batch_size=32 # adjust based on GPU memory
 # HQ Short captions: shortIB_captions, shortSV_captions, shortLLA_captions
 # Raw caption:    raw_caption
 # agg_mode: "concat" (concatenate cls with all patch tokens and average pool) or "cls" (use cls token only)
-source_caption="longSV_captions"
+source_caption="shortSV_captions"
 agg_mode="concat"
 output_dir="/dss/mcmlscratch/07/ga27tus3"
 
@@ -92,6 +92,6 @@ else
     --output_hidden_states \
     --downsample \
     --num_workers 4 \
-    --start_shard_index 768
-    # --end_shard_index 767
+    --start_shard_index 0 \
+    --end_shard_index 255
 fi

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ----------------------TRAIN SETTING------------------------
 
-epoch_num=30
+epoch_num=50
 lr=1e-5
 bs=32768
 d=1024
@@ -14,9 +14,10 @@ logit_bias=-10
 # extra_text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_shortSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_longSV_captions data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_shortSV_captions"
 # output_name="sail_l_nv2_merged23m"
 
-text_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12m_longSV_captions" 
+text_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12m_shortSV_captions"
+# extra_text_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12m_longSV_captions"
 image_embedding_list="/dss/mcmlscratch/07/ga27tus3/tensor_data/image_embedding/dinov2-large/dreamclipcc12m_concat"
-output_name="sail_dinov2l_nv2_cc12m_full_bs_32768_clone"
+output_name="sail_dinov2l_nv2_cc12m_shortSV_correct_pooling_2"
 # ------------------------------------------------------------
 
 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
@@ -26,15 +27,15 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --dataset-type embedding \
     --seed 42 \
     --resume latest \
-    --save-frequency 2 \
+    --save-frequency 1 \
     --report-to wandb \
     --batch-size $bs \
     --lr $lr \
     --epochs $epoch_num \
-    --workers 0 \
+    --workers 2 \
     --optimizer lion \
     --siglip \
-    --wd 1e-4 \
+    --wd 1e-7 \
     --target-dimension $d \
     --linear-type star \
     --log-every-n-steps 5 \
@@ -43,6 +44,7 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
     --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs
+    # --extra-text-embedding-list $extra_text_embedding_list \
     # --hidden_states \
     # --reconstruction \
     # --reconstruction_alpha 0.00005
