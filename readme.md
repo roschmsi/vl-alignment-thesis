@@ -1,3 +1,17 @@
+# Download
+
+Use [download_hugginface.py](data_preparation/download_huggingface.py/) to download pixparse CC3M or CC12M from huggingface in webdataset format. Set repo_id and local_dir at the beginning of the file.
+SLURM script: [download_huggingface.sbatch](slurm/download_huggingface.sbatch)
+
+# Feature extraction
+
+
+# Alignment
+
+
+
+
+
 # [CVPR 2025 Highlight] Assessing and Learning Alignment of Unimodal Vision and Language Models
 
 [![Paper](https://img.shields.io/badge/paper-arxiv.2412.03561-B31B1B.svg)](https://arxiv.org/abs/2412.04616)
@@ -214,6 +228,9 @@ bash scripts/sail_eval.sh
 The evaluation results will be saved to `evaluation/eval_result/{task}`
 
 ##### Open-vocabulary semantic segmentation Instructions please refer to [here](https://github.com/lezhang7/SAIL/blob/main/evaluation/segmentation_readme.md)
+
+pip install -U mmengine "mmcv>=2.0.0"
+pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
 
 ## SAIL Enhances SSL Vision Models for MLLMs
 

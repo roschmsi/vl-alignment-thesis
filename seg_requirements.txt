@@ -11,13 +11,13 @@ mmcv==2.0.1
 mmengine==0.8.4
 mmsegmentation==1.1.1
 nltk==3.8.1
-numpy==2.0.0
+numpy==1.26.4
 opencv_python==4.6.0.66
 opencv_python_headless==4.8.0.76
 openpyxl==3.1.2
 Pillow==10.4.0
 pycocoevalcap==1.2
-pycocotools==2.0.7
+pycocotools==2.0.7pyt
 regex==2023.8.8
 ruamel_yaml==0.18.6
 safetensors==0.4.3
@@ -26,3 +26,4 @@ torch==1.13.1
 torchvision==0.14.1
 tqdm==4.65.2
 transformers==4.37.2
+datasets

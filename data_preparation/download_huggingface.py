@@ -1,12 +1,11 @@
 from huggingface_hub import snapshot_download
 import os
 
-# Define the repository ID and the local directory to save files
-# repo_id = "pixparse/cc3m-wds"
-# local_dir = "/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m"
+repo_id = "pixparse/cc3m-wds"
+local_dir = "/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m"
 
-repo_id = "Kaichengalex/YFCC15M"
-local_dir = "/dss/mcmlscratch/07/ga27tus3/yfcc15m"
+# repo_id = "Kaichengalex/YFCC15M"
+# local_dir = "/dss/mcmlscratch/07/ga27tus3/yfcc15m"
 
 print(f"Downloading shards from {repo_id} to {local_dir}...")
 
@@ -17,7 +16,8 @@ snapshot_download(
     # allow_patterns=["*.tar"]
 )
 
-print("\nDownload complete.")
+print("Download complete.")
+
 print("Listing downloaded shards:")
 
 if os.path.exists(local_dir):

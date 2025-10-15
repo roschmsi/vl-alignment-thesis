@@ -50,6 +50,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=32, help="Processing batch size")
     parser.add_argument("--agg_mode", type=str, default="concat", help="Aggregation mode for vision models")
     parser.add_argument("--throughput", action="store_true", help="Measure throughput without saving")
+    parser.add_argument("--input_dir", type=str, default="./data", help="Directory to downloaded shards.")
     parser.add_argument("--output_dir", type=str, default="./data", help="Base directory to store embeddings")
     parser.add_argument("--output_hidden_states", action="store_true", help="Output the hidden states of a model")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for DataLoader")
@@ -78,6 +79,7 @@ def process_batch_from_loader(data_loader, model_func, start_index, batch_size, 
         current_throughput = num_samples_in_batch / batch_time
         avg_throughput = total_samples / total_time
 
+        # TODO check that there is only a single downsampling step
         if downsample:
             L = batch_embeddings.shape[-1]
             start = (L - 1) % 3
@@ -184,10 +186,10 @@ def main():
     
     # data_path = f"/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m_recaptioned/cc3m-recaptioned-{{000000..000001}}.tar"
     if args.data == "dreamclipcc3m":
-        base_path = "/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m_recaptioned/cc3m-train-"
+        base_path = f"{args.input_dir}/cc3m-train-"
         max_shard_index = 282
     elif args.data == "dreamclipcc12m":
-        base_path = "/dss/mcmlscratch/07/ga27tus3/pixparse/cc12m_recaptioned/cc12m-train-"
+        base_path = f"{args.input_dir}/cc12m-train-"
         max_shard_index = 1001
     else:
         raise ValueError(f"Unknown data: {args.data}.")

@@ -11,30 +11,32 @@ import pdb
 def custom_collate_fn(batch):
     if len(batch[0]) == 3:
         text_vectors, image_vectors, extra_text_vectors = zip(*batch)
+        return torch.stack(text_vectors, 0), torch.stack(image_vectors, 0), torch.stack(extra_text_vectors, 0)
     else:
         text_vectors, image_vectors = zip(*batch)
-        extra_text_vectors = None
+        return torch.stack(text_vectors, 0), torch.stack(image_vectors, 0)
 
-    text_vectors = pad_sequence(text_vectors, batch_first=True, padding_value=0)
-    image_vectors = pad_sequence(image_vectors, batch_first=True, padding_value=0)
+    # text_vectors = pad_sequence(text_vectors, batch_first=True, padding_value=0)
+    # image_vectors = pad_sequence(image_vectors, batch_first=True, padding_value=0)
     
-    if extra_text_vectors:
-        extra_text_vectors = pad_sequence(extra_text_vectors, batch_first=True, padding_value=0)
-        return text_vectors, image_vectors, extra_text_vectors
-    else:
-        return text_vectors, image_vectors
+    # if extra_text_vectors:
+    #     extra_text_vectors = pad_sequence(extra_text_vectors, batch_first=True, padding_value=0)
+    #     return text_vectors, image_vectors, extra_text_vectors
+    # else:
+    #     return text_vectors, image_vectors
 
-def extract_hidden_states(features):
-        n_layers = features.size(2)
+def extract_hidden_states(features, hidden_states_idx=None):
+    if hidden_states_idx is None:
+        n_layers = features.shape[-1]
         third = n_layers // 3
-
         idx1 = third
         idx2 = 2 * third
+        hidden_states_idx=[idx1, idx2, -1]
 
-        features = features[:, :, [idx1, idx2, -1]]
-        features = torch.flatten(features, start_dim=1, end_dim=2)
+    features = features[:, hidden_states_idx]
+    features = features.flatten()
 
-        return features
+    return features
 
 def load_vectors(embedding_dirs: list[str], hidden_states: bool = False,
                       dtype: torch.dtype = torch.float16) -> torch.Tensor:
@@ -113,7 +115,7 @@ class VLEmbeddingDataset(Dataset):
 
 
 class MMAPDataset(Dataset):
-    def __init__(self, text_embedding_path, image_embedding_path, metadata_path, extra_text_path=None, train_num_samples=None, hidden_states=False):
+    def __init__(self, text_embedding_list, image_embedding_list, extra_text_embedding_list, metadata_path=None, train_num_samples=None, hidden_states=False, hidden_states_img_idx=None, hidden_states_text_idx=None):
         super().__init__()
 
         metadata = torch.load(metadata_path)
@@ -123,28 +125,78 @@ class MMAPDataset(Dataset):
         vision_dtype = np.dtype(metadata['vision_dtype'])
         text_dtype = np.dtype(metadata['text_dtype'])
 
-        self.vision_reps = np.memmap(
-            vision_mmap_path, 
+        self.hidden_states = hidden_states
+        self.hidden_states_text_idx = hidden_states_text_idx
+        self.hidden_states_img_idx = hidden_states_img_idx
+
+        # TODO adapt dealing with list when CC3M, CC12M, YFCC15M are merged
+        self.image_vectors = np.memmap(
+            image_embedding_list[0], 
             dtype=vision_dtype, 
             mode='r',
             shape=(self.num_samples, *vision_shape)
         )
-        self.text_reps = np.memmap(
-            text_mmap_path, 
+        self.text_vectors = np.memmap(
+            text_embedding_list[0], 
             dtype=text_dtype, 
             mode='r',
             shape=(self.num_samples, *text_shape)
         )
 
+        n_img, n_txt = len(self.image_vectors), len(self.text_vectors)
+        assert n_img > 0 and n_txt > 0 and n_txt % n_img == 0, f"text vectors length ({n_txt}) is not a multiple of image vectors length ({n_img})"
+
+        if extra_text_embedding_list:
+            self.extra_text_vectors = np.memmap(
+                extra_text_embedding_list[0], 
+                dtype=text_dtype, 
+                mode='r',
+                shape=(self.num_samples, *text_shape)
+            )
+            
+            assert len(self.extra_text_vectors) == len(self.text_vectors), f"extra text vectors length {len(self.extra_text_vectors)} is not equal to text vectors length {len(self.text_vectors)}"
+
+        self.image_num = len(self.image_vectors)
+        self.text_num = len(self.text_vectors)
+
+        self.visual_dim = self.image_vectors.shape[1]
+        self.text_dim = self.text_vectors.shape[1]
+
+        if self.hidden_states:
+            if self.hidden_states_img_idx:
+                self.visual_dim = self.visual_dim * len(self.hidden_states_img_idx)
+            else:
+                self.visual_dim = self.visual_dim * 3
+
+            if self.hidden_states_text_idx:
+                self.text_dim = self.text_dim * len(self.hidden_states_text_idx)
+            else:
+                self.text_dim = self.text_dim * 3
+
     def __len__(self):
         return self.num_samples
 
     def __getitem__(self, idx):
-        vision_rep = self.vision_reps[idx]
-        text_rep = self.text_reps[idx]
-        
-        return torch.from_numpy(vision_rep.copy()), torch.from_numpy(text_rep.copy())
+        img = np.ascontiguousarray(self.image_vectors[idx])
+        txt = np.ascontiguousarray(self.text_vectors[idx])
 
+        if self.hidden_states:
+            img = extract_hidden_states(img, self.hidden_states_img_idx)
+            txt = extract_hidden_states(txt, self.hidden_states_text_idx)
+        else:
+            img = img[:, -1]
+            txt = txt[:, -1]
+
+        if hasattr(self, 'extra_text_vectors'):
+            extra = np.ascontiguousarray(self.extra_text_vectors[idx])
+            if self.hidden_states:
+                extra = extract_hidden_states(extra, self.hidden_states_text_idx)
+            else:
+                extra = extra[:, -1]
+
+            return torch.from_numpy(txt), torch.from_numpy(img), torch.from_numpy(extra)
+        
+        return torch.from_numpy(txt), torch.from_numpy(img)
 
 
 def batched_collate_fn(batch):
