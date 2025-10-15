@@ -44,7 +44,11 @@ def create_model(
         width_factor: int = 8,
         sharelock: bool = False,
         hidden_states: bool = False,
+        hidden_states_img_idx = None,
+        hidden_states_text_idx = None,
         reconstruction: bool = False,
+        reconstruction_type = "linear",
+        downsample=False,
 ):  
     if isinstance(device, str):
         device = torch.device(device)
@@ -64,6 +68,9 @@ def create_model(
             width_factor=width_factor,
             sharelock=sharelock,
             hidden_states=hidden_states,
+            hidden_states_img_idx=hidden_states_img_idx,
+            hidden_states_text_idx=hidden_states_text_idx,
+            downsample=downsample,
         )
     else:
        model = LayerClass(
@@ -77,6 +84,7 @@ def create_model(
             width_factor=width_factor,
             hidden_states=hidden_states,
             reconstruction=reconstruction,
+            reconstruction_type=reconstruction_type,
         )
     model.to(device=device)
     return model

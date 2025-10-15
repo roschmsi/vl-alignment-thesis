@@ -14,7 +14,20 @@ from torch.cuda.amp import autocast
 from functools import partial
 import numpy as np
 import pdb
-from data.embedding_data import extract_hidden_states
+
+
+def extract_hidden_states_from_batch(features, hidden_states_idx):
+    if hidden_states_idx is None:
+        n_layers = features.shape[-1]
+        third = n_layers // 3
+        idx1 = third
+        idx2 = 2 * third
+        hidden_states_idx = [idx1, idx2, -1]
+
+    features = features[:, :, hidden_states_idx]
+    features = features.flatten(start_dim=1)
+
+    return features
 
 
 class AlignmentLayer(nn.Module):
@@ -30,7 +43,8 @@ class AlignmentLayer(nn.Module):
         only_vision: bool = False,
         width_factor: int = 8,
         hidden_states = False,
-        reconstruction = False
+        reconstruction = False,
+        reconstruction_type = "linear",
     ):
         super(AlignmentLayer, self).__init__()
         assert only_vision or text_dimension is not None, "text_dimension must be provided if only_vision is False"
@@ -62,14 +76,12 @@ class AlignmentLayer(nn.Module):
         self.hidden_states = hidden_states
         self.reconstruction = reconstruction
 
-        # pdb.set_trace()
-
         if self.reconstruction:
             self.reconstruction_head = ReconstructionHead(
                 vision_dimension = vision_dimension ,
                 text_dimension = text_dimension,
                 target_dimension = target_dimension,
-                linear_type = linear_type,
+                reconstruction_type = reconstruction_type,
                 cast_dtype = cast_dtype,
                 width_factor = width_factor,
                 hidden_states=hidden_states,
@@ -120,9 +132,13 @@ class AlignmentLayer(nn.Module):
             text_features = None
 
         if extra_text_features is not None:
-            extra_text_features = extra_text_features.to(self.cast_dtype) 
-            extra_text_features = self.text_layer_norm(extra_text_features)
-            extra_text_features = self.text_mapping_network(extra_text_features)
+            extra_text_features_cast = extra_text_features.to(self.cast_dtype) 
+            if torch.isnan(extra_text_features_cast).any():
+                breakpoint()
+            extra_text_features_norm = self.text_layer_norm(extra_text_features_cast)
+            if torch.isnan(extra_text_features_norm).any():
+                breakpoint()
+            extra_text_features = self.text_mapping_network(extra_text_features_norm)
         else: 
             extra_text_features = None
 
@@ -253,15 +269,16 @@ class ReconstructionHead(nn.Module):
         only_vision: bool = False,
         width_factor: int = 8,
         hidden_states = False,
+        reconstruction_type = "linear",
     ):
         super(ReconstructionHead, self).__init__()
         assert only_vision or text_dimension is not None, "text_dimension must be provided if only_vision is False"
 
         self.cast_dtype = cast_dtype
-        self.linear_type = linear_type
-        if linear_type == "star":
+        self.reconstruction_type = reconstruction_type
+        if reconstruction_type == "star":
             LinearLayer = partial(StarMLP, width_factor=width_factor, activation=nn.ReLU6())
-        elif linear_type == "mlp":
+        elif reconstruction_type == "mlp":
             LinearLayer = SiglipMLP
         else:
             LinearLayer = nn.Linear
@@ -329,10 +346,19 @@ class SAILModel(nn.Module):
         width_factor: int = 8,
         sharelock: bool = False,
         hidden_states=False,
+        hidden_states_img_idx=None,
+        hidden_states_text_idx=None,
+        downsample=False,
     ):
         super(SAILModel, self).__init__()
         self.text_model = SentenceEmbedding(text_model_name, output_hidden_states=hidden_states)
         self.vision_model = ImageEmbedding(vision_model_name, seg=seg, agg_mode=agg_mode, output_hidden_states=hidden_states)
+
+        self.hidden_states = hidden_states
+        self.hidden_states_img_idx = hidden_states_img_idx
+        self.hidden_states_text_idx = hidden_states_text_idx
+        self.downsample = downsample
+
         if any(x in vision_model_name for x in ['mae','ibot','dinov1','ml-aim','ijepa','clip','aimv2']) or 'patch' in agg_mode or 'cls' in agg_mode:
             if hasattr(self.vision_model.model, 'config'):
                 vision_dimension = self.vision_model.model.config.hidden_size
@@ -340,13 +366,21 @@ class SAILModel(nn.Module):
                 vision_dimension = self.vision_model.model.embed_dim
         else:
             vision_dimension = self.vision_model.model.config.hidden_size * 2
+        
         LayerClass = ShareLockAlignmentLayer if sharelock else AlignmentLayer
         
         text_dimension = self.text_model.model.config.hidden_size
 
-        if hidden_states:
-            vision_dimension = vision_dimension * 3
-            text_dimension = text_dimension * 3
+        if self.hidden_states:
+            if self.hidden_states_img_idx:
+                vision_dimension = vision_dimension * len(self.hidden_states_img_idx)
+            else:
+                vision_dimension = vision_dimension * 3
+
+            if self.hidden_states_text_idx:
+                text_dimension = text_dimension * len(self.hidden_states_text_idx)
+            else:
+                text_dimension = text_dimension * 3
 
         self.vlhead = LayerClass(
             vision_dimension = vision_dimension ,
@@ -359,8 +393,6 @@ class SAILModel(nn.Module):
         )
         if vlhead_weights_path is not None:
             self.load_vlhead_weights(vlhead_weights_path)
-
-        self.hidden_states = hidden_states
 
     def freeze_except_vlhead(self):
         self._freeze_parameters(self.vision_model)
@@ -402,8 +434,14 @@ class SAILModel(nn.Module):
         else:
             features = self.vision_model(image, patch_mode=patch_mode, attetion_type=attetion_type, ignore_residual=ignore_residual)
 
+        # TODO ensure that this downsampling is consistent, add if clause
+        if self.downsample:
+            L = features.shape[-1]
+            start = (L - 1) % 3
+            features = features[:, :, start::3]
+
         if self.hidden_states:
-            features = extract_hidden_states(features)
+            features = extract_hidden_states_from_batch(features, self.hidden_states_img_idx)
 
         outputs = self.vlhead(image_features=features)
         image_features = outputs["image_features"]
@@ -423,12 +461,20 @@ class SAILModel(nn.Module):
         is_pre_encoded: bool = False,
         return_encoded: bool = False,
     ):        
+
         if self.hidden_states:
             if is_pre_encoded:
                 features = text
             else:
                 features = self.text_model.get_sentence_embeddings(text_list)
-                features = extract_hidden_states(features)
+
+                # TODO ensure that this downsampling is consistent, add if clause
+                if self.downsample:
+                    L = features.shape[-1]
+                    start = (L - 1) % 3
+                    features = features[:, :, start::3]
+
+                    features = extract_hidden_states_from_batch(features, self.hidden_states_text_idx)
         else:
             if is_pre_encoded:
                 features = text
@@ -459,6 +505,7 @@ class SAILModel(nn.Module):
         is_pre_encoded: bool = False,
         return_encoded: bool = False,
     ):
+        
         if is_pre_encoded:
             # if its pre-encoded, we do not need to return encoded features
             norm_image_features = self.encode_image(
@@ -492,6 +539,12 @@ class SAILModel(nn.Module):
             # if we do not need to return encoded features and it is not pre-encoded, usuallu during training
             norm_image_features = self.encode_image(images, normalize=True)
             norm_text_features = self.encode_text(texts, text_list=text_list, normalize=True)
+
+        # TODO downsampling to align with encoding setup
+        # breakpoint()
+        # L = batch_embeddings.shape[-1]
+        # start = (L - 1) % 3
+        # batch_embeddings = batch_embeddings[:, :, start::3]
 
         # Log the sizes of embeddings
         logits_per_text = (

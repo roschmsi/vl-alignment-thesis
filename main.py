@@ -166,6 +166,8 @@ def main(args):
         width_factor = args.width_factor,
         sharelock = args.sharelock,
         hidden_states = args.hidden_states,
+        hidden_states_img_idx = args.hidden_states_img_idx,
+        hidden_states_text_idx = args.hidden_states_text_idx,
         reconstruction=args.reconstruction,
         **model_kwargs
     )

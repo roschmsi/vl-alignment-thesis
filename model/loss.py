@@ -378,7 +378,6 @@ class SigLipLoss(nn.Module):
         return logits
     
     def _loss(self, image_features, text_features, extra_text_features, logit_scale, logit_bias=None, logits_per_text=None, negative_only=False):
-        # breakpoint()
 
         image_features = F.normalize(image_features, p=2, dim=-1)
         text_features = F.normalize(text_features, p=2, dim=-1)

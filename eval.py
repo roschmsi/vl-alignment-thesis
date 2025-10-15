@@ -123,6 +123,26 @@ def parse_args():
         action="store_true",
         help="Use hidden states for alignment.",
     )
+    parser.add_argument(
+        "--hidden_states_text_idx",
+        type=int,
+        nargs="+",
+        default=None,
+        help='Provide indices of hidden states for alignment.'
+    )
+    parser.add_argument(
+        "--hidden_states_img_idx",
+        type=int,
+        nargs="+",
+        default=None,
+        help='Provide indices of hidden states for alignment.'
+    )
+    parser.add_argument(
+        "--downsample",
+        default=False,
+        action="store_true",
+        help="Hidden representations were downsampled during alignment.",
+    )
     args = parser.parse_args()
 
     # Overide args with model_config.yaml
@@ -168,6 +188,9 @@ def main(args):
         sharelock=args.sharelock,
         width_factor=args.width_factor,
         hidden_states=args.hidden_states,
+        hidden_states_img_idx=args.hidden_states_img_idx,
+        hidden_states_text_idx=args.hidden_states_text_idx,
+        downsample=args.downsample,
     )
     text_model_name = args.text_model.split("/")[-1]
     vision_model_name = args.vision_model.split("/")[-1]
@@ -265,7 +288,7 @@ def main(args):
         )
     elif args.task.lower() == "mmvp":
         from evaluation import mmvp_eval
-        mmvp_dir = "evaluation/MMVP_VLM"
+        mmvp_dir = os.path.join(args.dataset_root_dir, "MMVP_VLM")
         results = mmvp_eval(
             model,
             text_model_name=text_model_name,
