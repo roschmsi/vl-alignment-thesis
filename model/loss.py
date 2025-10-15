@@ -379,6 +379,30 @@ class SigLipLoss(nn.Module):
     
     def _loss(self, image_features, text_features, extra_text_features, logit_scale, logit_bias=None, logits_per_text=None, negative_only=False):
 
+        if self.world_size > 1:
+            image_features, text_features = gather_features(
+                image_features, text_features,
+                local_loss=False, 
+                gather_with_grad=False,
+                rank=self.rank,
+                world_size=self.world_size,
+                use_horovod=self.use_horovod
+            )
+
+            # 2. Gather EXTRA text features if they exist
+            if extra_text_features is not None:
+                dummy_zeros = torch.zeros_like(image_features[:extra_text_features.shape[0]])
+                
+                _, extra_text_features = gather_features(
+                    dummy_zeros,
+                    extra_text_features,
+                    local_loss=False, 
+                    gather_with_grad=False,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    use_horovod=self.use_horovod
+                )
+
         image_features = F.normalize(image_features, p=2, dim=-1)
         text_features = F.normalize(text_features, p=2, dim=-1)
       

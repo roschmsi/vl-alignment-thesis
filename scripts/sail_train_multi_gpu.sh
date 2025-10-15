@@ -22,9 +22,17 @@ text_embedding_list="/dss/mcmlscratch/07/ga27tus3/mmap_data/NV-Embed-v2/dreamcli
 extra_text_embedding_list="/dss/mcmlscratch/07/ga27tus3/mmap_data/NV-Embed-v2/dreamclipcc12m_shortSV_captions.mmap"
 image_embedding_list="/dss/mcmlscratch/07/ga27tus3/mmap_data/dinov2-large/dreamclipcc12m_concat.mmap"
 metadata_path="/dss/mcmlscratch/07/ga27tus3/mmap_data/metadata.pt"
-output_name="sail_dinov2l_nv2_cc12m_mmap_raw_shortSV_multigpu"
+output_name="sail_dinov2l_nv2_cc12m_mmap_raw_shortSV_multigpu_8k_per_gpu"
 
-python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
+
+# Corrected Bash Script Snippet:
+
+NUM_GPUS=2 # Or whatever you set it to
+
+torchrun --nproc_per_node=$NUM_GPUS \
+    --master_port=$((10000 + $RANDOM % 50000)) \
+    /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
+    -- \
     --text-embedding-list $text_embedding_list \
     --extra-text-embedding-list $extra_text_embedding_list \
     --image-embedding-list $image_embedding_list \
@@ -38,7 +46,7 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --batch-size $bs \
     --lr $lr \
     --epochs $epoch_num \
-    --workers 32 \
+    --workers 8 \
     --optimizer lion \
     --siglip \
     --wd 1e-7 \
@@ -49,13 +57,10 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --name $output_name \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
-    --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs
-    # --hidden_states \
-    # --reconstruction \
-    # --reconstruction_type linear \
-    # --reconstruction_alpha 0.00005 \
-    # --hidden_states_img_idx -2 -1 \
-    # --hidden_states_text_idx -2 -1 \
+    --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs 
+    # --distributed \
+    # --world-size $NUM_GPUS \
+    # ^^^ Move the '--logs' flag to be passed to your script, not torchrun itself.
 
 
 if [ $? -ne 0 ]; then
