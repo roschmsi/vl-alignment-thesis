@@ -7,7 +7,7 @@ model = dict(
 # dataset settings
 dataset_type = 'ADE20KDataset'
 #Change this to your local path
-data_root = '/network/scratch/q/qian.yang/segmentation_datasets/ADEChallengeData2016'
+data_root = '/dss/mcmlscratch/07/ga27tus3/data/ADEChallengeData2016'
 
 test_pipeline = [
     dict(type='LoadImageFromFile'),

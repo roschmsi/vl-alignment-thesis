@@ -7,7 +7,7 @@ model = dict(
 
 # dataset settings
 dataset_type = 'PascalVOC20Dataset'
-data_root = '/network/scratch/q/qian.yang/segmentation_datasets/pascalvoc20/VOCdevkit/VOC2012'
+data_root = '/dss/mcmlscratch/07/ga27tus3/data/VOC2012_train_val/VOC2012_train_val'
 
 test_pipeline = [
     dict(type='LoadImageFromFile'),

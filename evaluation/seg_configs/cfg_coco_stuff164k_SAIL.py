@@ -7,7 +7,7 @@ model = dict(
 
 # dataset settings
 dataset_type = 'COCOStuffDataset'
-data_root = '/home/mila/l/le.zhang/scratch/datasets/coco_stuff164k'
+data_root = '/dss/mcmlscratch/07/ga27tus3/data/coco_stuff164k'
 
 test_pipeline = [
     dict(type='LoadImageFromFile'),
