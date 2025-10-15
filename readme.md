@@ -7,6 +7,7 @@ Setup conda environment using requirements.txt.
 ```bash
 conda create -n ot_env python=3.11
 conda activate ot_env
+```
 
 ## Download
 
