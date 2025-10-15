@@ -83,7 +83,7 @@ def zeroshot_classifier(
                     class_embedding /= class_embedding.norm()
                     zeroshot_weights.append(class_embedding)
                 os.makedirs(os.path.dirname(backbone_path), exist_ok=True)
-                torch.save(pre_encode_model_features, backbone_path)
+                # torch.save(pre_encode_model_features, backbone_path)
 
             zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device)
 
@@ -117,7 +117,7 @@ def extract_and_save_backbone_features(
                 top5 += acc5
                 n += images.size(0)
 
-        save_features(pre_encode_image_features, save_path)
+        # save_features(pre_encode_image_features, save_path)
 
     return top1, top5, n
 

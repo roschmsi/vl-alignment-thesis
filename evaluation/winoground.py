@@ -106,8 +106,8 @@ def winoground_eval(model, text_model_name, vision_model_name, save_dir):
                 }
             )
 
-        save_features(pre_encode_image_features, image_feature_path)
-        save_features(pre_encode_text_features, text_feature_path)
+        # save_features(pre_encode_image_features, image_feature_path)
+        # save_features(pre_encode_text_features, text_feature_path)
     else:
         pre_encode_image_features = load_features(image_feature_path)
         pre_encode_text_features = load_features(text_feature_path)
