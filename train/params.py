@@ -74,6 +74,12 @@ def parse_args(args):
         help="Path to file(s) with extra text emebdding training data. ",
     )
     parser.add_argument(
+        "--metadata-path",
+        type=str,
+        default=None,
+        help="Path to file with mmap metadata.",
+    )
+    parser.add_argument(
         "--head-weights-path",
         type=str,
         default=None,
@@ -574,10 +580,30 @@ def parse_args(args):
         help='Use hidden states for alignment.'
     )
     parser.add_argument(
+        "--hidden_states_img_idx",
+        type=int,
+        nargs="+",
+        default=None,
+        help='Provide indices of vision encoder hidden states for alignment.'
+    )
+    parser.add_argument(
+        "--hidden_states_text_idx",
+        type=int,
+        nargs="+",
+        default=None,
+        help='Provide indices of langage encoder hidden states for alignment.'
+    )
+    parser.add_argument(
         "--reconstruction",
         default=False,
         action="store_true",
         help='Reconstruct features to preserve information.'
+    )
+    parser.add_argument(
+        "--reconstruction_type",
+        type=str,
+        default="linear",
+        help='Type of reconstruction network.'
     )
     parser.add_argument(
         "--reconstruction_alpha",
