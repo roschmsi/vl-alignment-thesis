@@ -50,12 +50,6 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
     --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs
-    # --hidden_states \
-    # --reconstruction \
-    # --reconstruction_type linear \
-    # --reconstruction_alpha 0.00005 \
-    # --hidden_states_img_idx -2 -1 \
-    # --hidden_states_text_idx -2 -1 \
 
 
 if [ $? -ne 0 ]; then

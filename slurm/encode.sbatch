@@ -17,7 +17,7 @@ domain="image"
 batch_size=32
 source_caption="raw_caption"
 agg_mode="concat"
-input_dir=""
+input_dir="/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m"
 output_dir="/dss/mcmlscratch/07/ga27tus3"
 
 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode_wds.py \
