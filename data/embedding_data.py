@@ -55,7 +55,7 @@ def load_vectors(
         files.extend(natsorted(glob.glob(os.path.join(d, "*.pt"))))
 
     # TODO remove for full dataset
-    files = files[:2000]
+    # files = files[:2000]
 
     chunks = []
     with torch.no_grad():
