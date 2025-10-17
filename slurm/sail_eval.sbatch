@@ -1,13 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name="evaluate alignment"
-#SBATCH -p mcml-hgx-h100-94x4
-#SBATCH --qos=mcml 
+#SBATCH --partition=gpu_p
+#SBATCH --qos=gpu_normal
+#SBATCH --mem=20G
 #SBATCH --gres=gpu:1
+#SBATCH --constraint=h100_80gb
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=10
 #SBATCH --time=1:00:00
-#SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_eval_alignment.out
-#SBATCH -e /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_eval_alignment.err
+#SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_eval_alignment.out
+#SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_eval_alignment.err
 
-source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
-conda activate sail_env_2
+source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
+conda activate ot_env
 
-bash /dss/dsshome1/07/ga27tus3/ot-alignment/scripts/sail_eval.sh
+bash /home/eml/simon.roschmann/ot-alignment/scripts/sail_eval.sh

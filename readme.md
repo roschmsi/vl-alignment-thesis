@@ -1,8 +1,8 @@
 # Alignment of Vision and Language Models with Unpaired Data via Optimal Transport
 
-## Setup
+## Requirements
 
-Set up conda environment using requirements.txt.
+Set up a new conda environment using requirements.txt.
 
 ```bash
 conda create -n ot_env python=3.11
@@ -12,7 +12,7 @@ python -m pip install -r requirements.txt
 
 ## Download
 
-To download pixparse CC3M or CC12M datasets from huggingface in webdataset format, please use [download_huggingface.py](data_preparation/download_huggingface.py). Set repo_id and local_dir at the top of the file.
+To download pixparse CC3M or CC12M datasets from huggingface in webdataset format, please use [download_huggingface.py](data_preparation/download_huggingface.py).
 
 SLURM script: [download_huggingface.sbatch](slurm/download_huggingface.sbatch)
 
@@ -32,9 +32,7 @@ SLURM script: [match_image_caption.sbatch](slurm/match_image_caption.sbatch)
 
 ## Feature extraction
 
-Vision and text features can be extracted using [encode.py](encode.py). Specify the name of the vision_model and text_model and the domain ("image", "text") for which you want to extract embeddings. Set the input_dir to the directory with the webdataset tar-files. To run encoding on multiple gpu's in parallel (recommended for CC12M) you can split the shards by using start_shard_index and enc_shard_index, e.g. run encoding from start_shard_index = 0 to end_shard_index=254 on GPU 0, from start_shard_index=255 to end_shard_index=511 on GPU 1, etc.
-
-### Example Encoding Command
+Vision and text features can be extracted using [encode.py](encode.py). Specify the name of the vision_model and text_model and the domain ("image", "text") for which you want to extract embeddings. Set the input_dir to the directory containing the webdataset tar-files. To run encoding on multiple GPUs in parallel (recommended for CC12M) you can split the shards by using start_shard_index and end_shard_index, e.g. run encoding from start_shard_index = 0 to end_shard_index=254 on GPU 0, from start_shard_index=255 to end_shard_index=511 on GPU 1, etc.
 
 ```bash
 vision_model="facebook/dinov2-large"
@@ -54,16 +52,28 @@ SLURM script: [encode.sbatch](slurm/encode.sbatch)
 
 ## Alignment
 
-We align a pretrained vision and language model using the extracted representations. Following the setup proposed by SAIL, if we only utilize a single representation per modality, we can first load all vectors into memory, which will afterwards allow for very fast training iterations. Provide the path to the text embeddings (--text_embedding_list). For maximum performance, you can extract additional positive representations in the previous step and use them during alignment (--extra_text_embedding_list). Login to your Weights & Biases account using `wandb login` prior to the start of the training.
+We align a pretrained vision and language model using the extracted representations. Following the setup proposed by SAIL, if we only utilize a single representation per modality, we can first load all vectors into memory, which will allow for very fast training iterations. After the data loading is finished, training SAIL on CC3M for 20 epochs will only take 10 minutes. Provide the path to the text embeddings (--text_embedding_list). For maximum performance, you can extract representations of additional positives (synthetic captions) in the previous step and use them during alignment (--extra_text_embedding_list). Login to your Weights & Biases account using `wandb login` prior to the start of the training.
 
 SLURM script: [sail_train.sbatch](slurm/sail_train.sbatch)
 
 
 ## Evaluation
 
-For evaluation on ImageNet, COCO, Winoground, and MMVP use the [sail_eval.sh](scripts/sail_eval.sh).
-Specify the vision model, text_model, and the path to the checkpoint of your trained model.
+For evaluation on ImageNet, COCO, Winoground, and MMVP use [sail_eval.sh](scripts/sail_eval.sh). Specify the vision model, text_model, and the path to the checkpoint of your trained model.
 
+Download and unzip COCO datasets:
+```bash
+wget http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+wget http://images.cocodataset.org/zips/val2017.zip
+```
+Ensure that the images are in `.../coco/2027/val2017` and that the annotations are in `.../coco/2017/annotations`.
+
+The winoground dataset is automatically downloaded after setting up `huggingface-cli login`. Additionally, please download MMVP from huggingface: `huggingface-cli download MMVP/MMVP_VLM --repo-type dataset --local-dir ./MMVP_VLM`.
+
+SLURM script: [sail_eval.sbatch](slurm/sail_eval.sbatch)
+
+#
+#
 
 Below you can find the original SAIL readme:
 
@@ -273,7 +283,7 @@ We also provide evaluation scripts for MMVP, imagenet, winoground in `scripts/sa
   - Ensure that the vision and text models match the embedding data used to train the alignment layers.
 - Prepare datasets
   - Download [MMVP_VLM](https://huggingface.co/datasets/MMVP/MMVP_VLM/tree/main) and save it to `evaluation/MMVP_VLM`
-  - ImageNet and Winoground will be automatically downloadad and processed
+  - ImageNet and Winoground will be automatically downloadad and processed.
 - Specify the task from `imagenetv1 winoground MMVP` in `sail_eval.sh`, then evaluate by running:
 
 ```bash

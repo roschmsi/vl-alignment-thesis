@@ -12,7 +12,7 @@ text_embedding_list="/lustre/groups/eml/projects/sroschmann/tensor_data/text_emb
 # extra_text_embedding_list="/dss/mcmlscratch/07/ga27tus3/mmap_data/NV-Embed-v2/dreamclipcc12m_shortSV_captions.mmap"
 image_embedding_list="/lustre/groups/eml/projects/sroschmann/tensor_data/image_embedding/dinov2-large/cc3m_concat"
 # metadata_path="/dss/mcmlscratch/07/ga27tus3/mmap_data/metadata.pt"
-output_name="sail_dinov2l_nv2_cc3m_raw"
+output_name="sail_dinov2l_nv2_cc3m_raw_full"
 
 python /home/eml/simon.roschmann/ot-alignment/main.py \
     --text-embedding-list $text_embedding_list \
