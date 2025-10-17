@@ -83,7 +83,7 @@ def parse_args():
     parser.add_argument(
         "--agg_mode",
         type=str,
-        default='concat',
+        default="concat",
         help="Aggregation mode for image features.",
     ),
     parser.add_argument(
@@ -128,14 +128,14 @@ def parse_args():
         type=int,
         nargs="+",
         default=None,
-        help='Provide indices of hidden states for alignment.'
+        help="Provide indices of hidden states for alignment.",
     )
     parser.add_argument(
         "--hidden_states_img_idx",
         type=int,
         nargs="+",
         default=None,
-        help='Provide indices of hidden states for alignment.'
+        help="Provide indices of hidden states for alignment.",
     )
     parser.add_argument(
         "--downsample",
@@ -160,18 +160,15 @@ def parse_args():
 
 
 def main(args):
-    
 
-    epoch_num, training_info_str, model_prefix = extract_info_from_path(
-        args
-    )
+    epoch_num, training_info_str, model_prefix = extract_info_from_path(args)
     output_path = os.path.join(
         args.results_dir,
         args.task,
         model_prefix,
         f"{training_info_str}.json",
     )
-    
+
     if check_epoch_exists(output_path, epoch_num) and not args.overwrite:
         print(f"Epoch {epoch_num} already exists in {args.task}, skipping.")
         return None
@@ -252,10 +249,14 @@ def main(args):
             "annotations",
             "captions_val2017.json",
         )
-        assert os.path.exists(coco_root), f"COCO root directory does not exist: {coco_root}"
-        assert os.path.exists(coco_ann_file), f"COCO annotation file does not exist: {coco_ann_file}"
-        if args.agg_mode != 'concat':
-            vision_model_name = vision_model_name + '_' + args.agg_mode
+        assert os.path.exists(
+            coco_root
+        ), f"COCO root directory does not exist: {coco_root}"
+        assert os.path.exists(
+            coco_ann_file
+        ), f"COCO annotation file does not exist: {coco_ann_file}"
+        if args.agg_mode != "concat":
+            vision_model_name = vision_model_name + "_" + args.agg_mode
         results = coco_eval(
             model,
             bs=args.batch_size,
@@ -288,6 +289,7 @@ def main(args):
         )
     elif args.task.lower() == "mmvp":
         from evaluation import mmvp_eval
+
         mmvp_dir = os.path.join(args.dataset_root_dir, "MMVP_VLM")
         results = mmvp_eval(
             model,

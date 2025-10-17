@@ -14,13 +14,15 @@ def pt_save(pt_obj, file_path):
     with of as f:
         torch.save(pt_obj, file_path)
 
+
 def pt_load(file_path, map_location=None):
-    if file_path.startswith('s3'):
-        logging.info('Loading remote checkpoint, which may take a bit.')
+    if file_path.startswith("s3"):
+        logging.info("Loading remote checkpoint, which may take a bit.")
     of = fsspec.open(file_path, "rb")
     with of as f:
         out = torch.load(f, map_location=map_location, weights_only=False)
     return out
+
 
 def check_exists(file_path):
     try:

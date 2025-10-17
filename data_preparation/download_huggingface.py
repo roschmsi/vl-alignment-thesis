@@ -7,6 +7,7 @@ DATASET_TO_REPO = {
     "cc12m": "pixparse/cc12m-wds",
 }
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Download webdataset shards from Hugging Face hub."
@@ -21,9 +22,10 @@ def parse_args():
         "--output-dir",
         default="/lustre/groups/eml/projects/",
         type=str,
-        help="Directory to store the downloaded dataset. "
+        help="Directory to store the downloaded dataset. ",
     )
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -59,7 +61,10 @@ def main():
         else:
             print(f"(total files: {n})")
     else:
-        print(f"Could not find the directory '{local_dir}'. Check the download path and permissions.")
+        print(
+            f"Could not find the directory '{local_dir}'. Check the download path and permissions."
+        )
+
 
 if __name__ == "__main__":
     main()

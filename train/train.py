@@ -43,12 +43,12 @@ def postprocess_clip_output(model_out):
     return {
         "image_features": model_out[0],
         "text_features": model_out[1],
-        "logit_scale": model_out[2]
+        "logit_scale": model_out[2],
     }
 
 
 def unwrap_model(model):
-    if hasattr(model, 'module'):
+    if hasattr(model, "module"):
         return model.module
     else:
         return model
@@ -68,8 +68,10 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
 
     model.train()
 
-    data['train'].set_epoch(epoch)  # set epoch in process safe manner via sampler or shared_epoch
-    dataloader = data['train'].dataloader
+    data["train"].set_epoch(
+        epoch
+    )  # set epoch in process safe manner via sampler or shared_epoch
+    dataloader = data["train"].dataloader
     num_batches_per_epoch = dataloader.num_batches // args.accum_freq
     sample_digits = math.ceil(math.log(dataloader.num_samples + 1, 10))
 
@@ -94,9 +96,11 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
             extra_texts = None
         images = images.to(device=device, dtype=input_dtype, non_blocking=True)
         texts = texts.to(device=device, non_blocking=True)
-        
+
         if extra_texts is not None:
-            extra_texts = extra_texts.to(device=device, dtype=input_dtype, non_blocking=True)
+            extra_texts = extra_texts.to(
+                device=device, dtype=input_dtype, non_blocking=True
+            )
         data_time_m.update(time.time() - end)
         optimizer.zero_grad()
 
@@ -104,18 +108,20 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
             model_out = model(images, texts, extra_texts)
             logit_scale = model_out["logit_scale"]
             losses = loss(**model_out, output_dict=True)
-            total_loss = losses['contrastive_loss']
+            total_loss = losses["contrastive_loss"]
 
             if args.reconstruction:
                 reconstructed_image_features = model_out["reconstructed_image_features"]
                 reconstructed_text_features = model_out["reconstructed_text_features"]
-                
+
                 image_recon_loss = F.mse_loss(reconstructed_image_features, images)
                 text_recon_loss = F.mse_loss(reconstructed_text_features, texts)
                 total_recon_loss = image_recon_loss + text_recon_loss
-                losses.update({
-                    "reconstruction loss": total_recon_loss,
-                })
+                losses.update(
+                    {
+                        "reconstruction loss": total_recon_loss,
+                    }
+                )
 
                 total_loss += args.reconstruction_alpha * total_recon_loss
 
@@ -124,12 +130,16 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
         if scaler is not None:
             if args.grad_clip_norm is not None:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
             scaler.step(optimizer)
             scaler.update()
         else:
             if args.grad_clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
             optimizer.step()
 
         # Note: we clamp to 4.6052 = ln(100), as in the original paper.
@@ -139,7 +149,10 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
         batch_time_m.update(time.time() - end)
         end = time.time()
         batch_count = i_accum + 1
-        if is_master(args) and (i_accum % args.log_every_n_steps == 0 or batch_count == num_batches_per_epoch):
+        if is_master(args) and (
+            i_accum % args.log_every_n_steps == 0
+            or batch_count == num_batches_per_epoch
+        ):
             batch_size = len(images)
             num_samples = batch_count * batch_size * args.accum_freq * args.world_size
             samples_per_epoch = dataloader.num_samples
@@ -154,7 +167,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
             logit_scale_scalar = logit_scale.item()
             loss_log = " ".join(
                 [
-                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})" 
+                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})"
                     for loss_name, loss_m in losses_m.items()
                 ]
             )
@@ -162,28 +175,25 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
                 f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
                 f"LR: {optimizer.param_groups[0]['lr']:5f} "
                 f"Logit Scale: {logit_scale_scalar:.3f} "
-                f"Logit Bias: {model_out['logit_bias'].item():.3f} "
-                + loss_log
-
+                f"Logit Bias: {model_out['logit_bias'].item():.3f} " + loss_log
             )
 
             # Save train loss / etc. Using non avg meter values as loggers have their own smoothing
             log_data = {
                 "data_time": data_time_m.val,
                 "scale": logit_scale_scalar,
-                "logit_bias": model_out['logit_bias'].item(),
+                "logit_bias": model_out["logit_bias"].item(),
                 "lr": optimizer.param_groups[0]["lr"],
-            }            
-            log_data.update({name:val.val for name,val in losses_m.items()})
+            }
+            log_data.update({name: val.val for name, val in losses_m.items()})
 
             log_data = {"train/" + name: val for name, val in log_data.items()}
 
             if args.wandb:
-                assert wandb is not None, 'Please install wandb.'
-                log_data['step'] = step  # for backwards compatibility
+                assert wandb is not None, "Please install wandb."
+                log_data["step"] = step  # for backwards compatibility
                 wandb.log(log_data, step=step)
-                
-            
+
             # resetting batch / data time meters per log window
             batch_time_m.reset()
             data_time_m.reset()
@@ -196,6 +206,7 @@ def maybe_compute_generative_loss(model_out):
         token_labels = model_out["labels"]
         return F.cross_entropy(token_logits.permute(0, 2, 1), token_labels)
 
+
 def evaluate(model, data, loss, epoch, args):
     metrics = {}
     if not is_master(args):
@@ -206,8 +217,11 @@ def evaluate(model, data, loss, epoch, args):
     autocast = get_autocast(args.precision)
     input_dtype = get_input_dtype(args.precision)
 
-    if 'val' in data and (args.val_frequency and ((epoch % args.val_frequency) == 0 or epoch == args.epochs)):
-        dataloader = data['val'].dataloader
+    if "val" in data and (
+        args.val_frequency
+        and ((epoch % args.val_frequency) == 0 or epoch == args.epochs)
+    ):
+        dataloader = data["val"].dataloader
         num_samples = 0
         samples_per_val = dataloader.num_samples
 
@@ -227,7 +241,7 @@ def evaluate(model, data, loss, epoch, args):
                     all_text_features.append(model_out["text_features"])
                     # features are accumulated in CPU tensors, otherwise GPU memory exhausted quickly
                     # however, system RAM is easily exceeded and compute time becomes problematic
-                    total_loss = loss(**model_out, output_dict=True)['contrastive_loss']
+                    total_loss = loss(**model_out, output_dict=True)["contrastive_loss"]
 
                 cumulative_loss += total_loss * batch_size * batch_size
                 num_samples += batch_size * batch_size
@@ -235,17 +249,23 @@ def evaluate(model, data, loss, epoch, args):
             if is_master(args) and (i % 100) == 0:
                 logging.info(
                     f"Eval Epoch: {epoch} [{num_samples} / {samples_per_val}]\t"
-                    f"Loss: {cumulative_loss / num_samples:.6f}\t")
+                    f"Loss: {cumulative_loss / num_samples:.6f}\t"
+                )
             with autocast():
                 val_metrics = get_siglip_metrics(
                     image_features=torch.cat(all_image_features),
                     text_features=torch.cat(all_text_features),
                     logit_scale=model_out["logit_scale"],
-                    logit_bias=model_out["logit_bias"]
+                    logit_bias=model_out["logit_bias"],
                 )
             loss = cumulative_loss / num_samples
             metrics.update(
-                {**val_metrics, "val_loss": loss.item(), "epoch": epoch, "num_samples": num_samples}
+                {
+                    **val_metrics,
+                    "val_loss": loss.item(),
+                    "epoch": epoch,
+                    "num_samples": num_samples,
+                }
             )
 
     if not metrics:
@@ -259,17 +279,18 @@ def evaluate(model, data, loss, epoch, args):
     log_data = {"val/" + name: val for name, val in metrics.items()}
 
     if args.wandb:
-        assert wandb is not None, 'Please install wandb.'
+        assert wandb is not None, "Please install wandb."
         # if 'train' in data:
         #     dataloader = data['train'].dataloader
         #     num_batches_per_epoch = dataloader.num_batches // args.accum_freq
         #     step = num_batches_per_epoch * epoch
         # else:
         #     step = None
-        log_data['epoch'] = epoch
+        log_data["epoch"] = epoch
         wandb.log(log_data)
 
     return metrics
+
 
 def get_siglip_metrics(image_features, text_features, logit_scale, logit_bias):
     image_features = F.normalize(image_features, p=2, dim=-1)

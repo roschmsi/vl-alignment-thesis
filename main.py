@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from torch import optim
 import yaml
+
 try:
     import wandb
 except ImportError:
@@ -33,23 +34,26 @@ import pdb
 
 LATEST_CHECKPOINT_NAME = "epoch_latest.pt"
 
+
 def random_seed(seed=42, rank=0):
     torch.manual_seed(seed + rank)
     np.random.seed(seed + rank)
     random.seed(seed + rank)
 
+
 def natural_key(string_):
     """See http://www.codinghorror.com/blog/archives/001018.html"""
-    return [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', string_.lower())]
+    return [int(s) if s.isdigit() else s for s in re.split(r"(\d+)", string_.lower())]
 
 
-def get_latest_checkpoint(path: str, remote : bool):
+def get_latest_checkpoint(path: str, remote: bool):
     # as writen, this glob recurses, so can pick up checkpoints across multiple sub-folders
-    checkpoints = glob.glob(path + '**/*.pt', recursive=True)
+    checkpoints = glob.glob(path + "**/*.pt", recursive=True)
     if checkpoints:
         checkpoints = sorted(checkpoints, key=natural_key)
         return checkpoints[-1]
     return None
+
 
 def main(args):
     args = parse_args(args)
@@ -65,26 +69,28 @@ def main(args):
     # get the name of the experiments
     if args.name is None:
         # sanitize model name for filesystem / uri use, easier if we don't use / in name as a rule?
-        model_name_safe = args.model.replace('/', '-')
+        model_name_safe = args.model.replace("/", "-")
         date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
         if args.distributed:
             # sync date_str from master to all ranks
             date_str = broadcast_object(args, date_str)
-        args.name = '-'.join([
-            date_str,
-            f"model_{model_name_safe}",
-            f"lr_{args.lr}",
-            f"b_{args.batch_size}",
-            f"j_{args.workers}",
-            f"p_{args.precision}",
-        ])
+        args.name = "-".join(
+            [
+                date_str,
+                f"model_{model_name_safe}",
+                f"lr_{args.lr}",
+                f"b_{args.batch_size}",
+                f"j_{args.workers}",
+                f"p_{args.precision}",
+            ]
+        )
 
-    resume_latest = args.resume == 'latest'
+    resume_latest = args.resume == "latest"
     log_base_path = os.path.join(args.logs, args.name)
     args.log_path = None
     if is_master(args, local=args.log_local):
         os.makedirs(log_base_path, exist_ok=True)
-        log_filename = f'out-{args.rank}' if args.log_local else 'out.log'
+        log_filename = f"out-{args.rank}" if args.log_local else "out.log"
         args.log_path = os.path.join(log_base_path, log_filename)
         if os.path.exists(args.log_path) and not resume_latest:
             print(
@@ -97,7 +103,7 @@ def main(args):
     setup_logging(args.log_path, args.log_level)
 
     # Setup wandb, tensorboard, checkpoint logging
-    args.wandb = 'wandb' in args.report_to or 'all' in args.report_to
+    args.wandb = "wandb" in args.report_to or "all" in args.report_to
     args.checkpoint_path = os.path.join(log_base_path, "checkpoints")
     os.makedirs(args.checkpoint_path, exist_ok=True)
 
@@ -117,11 +123,13 @@ def main(args):
                     resume_from = None
             else:
                 # otherwise, list checkpoint dir contents and pick the newest checkpoint
-                resume_from = get_latest_checkpoint(checkpoint_path, remote=args.remote_sync is not None)
+                resume_from = get_latest_checkpoint(
+                    checkpoint_path, remote=args.remote_sync is not None
+                )
             if resume_from:
-                logging.info(f'Found latest resume checkpoint at {resume_from}.')
+                logging.info(f"Found latest resume checkpoint at {resume_from}.")
             else:
-                logging.info(f'No latest resume checkpoint found in {checkpoint_path}.')
+                logging.info(f"No latest resume checkpoint found in {checkpoint_path}.")
         if args.distributed:
             # sync found checkpoint path to all ranks
             resume_from = broadcast_object(args, resume_from)
@@ -129,47 +137,43 @@ def main(args):
 
     if args.copy_codebase:
         copy_codebase(args)
-  
+
     if args.distributed:
         logging.info(
-            f'Running in distributed mode with multiple processes. Device: {args.device}.'
-            f'Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}.')
+            f"Running in distributed mode with multiple processes. Device: {args.device}."
+            f"Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}."
+        )
     else:
-        logging.info(f'Running with a single process. Device {args.device}.')
-
+        logging.info(f"Running with a single process. Device {args.device}.")
 
     random_seed(args.seed, 0)
 
     # load data
     start_epoch = 0
-    data = get_data(
-        args,
-        epoch=start_epoch
+    data = get_data(args, epoch=start_epoch)
+    assert len(data), "At least one train or eval dataset must be specified."
 
-    )
-    assert len(data), 'At least one train or eval dataset must be specified.'
-    
-    # load model 
+    # load model
     model_kwargs = {}
     model = create_model(
-        text_model_name = args.text_model,
-        vision_model_name = args.vision_model,
-        head_weights_path = args.head_weights_path,
-        vision_dimesion = data['train'].data_info['visual_dim'],
-        text_dimension = data['train'].data_info['text_dim'],
-        target_dimension = args.target_dimension,
-        precision = args.precision,
-        device = device,
-        linear_type = args.linear_type,
-        logit_scale = args.logit_scale,
-        logit_bias = args.logit_bias,
-        width_factor = args.width_factor,
-        sharelock = args.sharelock,
-        hidden_states = args.hidden_states,
-        hidden_states_img_idx = args.hidden_states_img_idx,
-        hidden_states_text_idx = args.hidden_states_text_idx,
+        text_model_name=args.text_model,
+        vision_model_name=args.vision_model,
+        head_weights_path=args.head_weights_path,
+        vision_dimesion=data["train"].data_info["visual_dim"],
+        text_dimension=data["train"].data_info["text_dim"],
+        target_dimension=args.target_dimension,
+        precision=args.precision,
+        device=device,
+        linear_type=args.linear_type,
+        logit_scale=args.logit_scale,
+        logit_bias=args.logit_bias,
+        width_factor=args.width_factor,
+        sharelock=args.sharelock,
+        hidden_states=args.hidden_states,
+        hidden_states_img_idx=args.hidden_states_img_idx,
+        hidden_states_text_idx=args.hidden_states_text_idx,
         reconstruction=args.reconstruction,
-        **model_kwargs
+        **model_kwargs,
     )
     # print trainanble parameters
     random_seed(args.seed, args.rank)
@@ -194,44 +198,60 @@ def main(args):
 
         # Save model configuration as YAML file
         model_config = {
-            'target_dimension': args.target_dimension,
-            'linear_type': args.linear_type,
+            "target_dimension": args.target_dimension,
+            "linear_type": args.linear_type,
         }
-        
+
         config_file = os.path.join(args.logs, args.name, "model_config.yaml")
         with open(config_file, "w") as f:
             yaml.dump(model_config, f, default_flow_style=False)
-        
+
         logging.info(f"Model configuration saved to {config_file}")
-    
 
     if args.distributed:
         ddp_args = {}
         if args.ddp_static_graph:
             # this doesn't exist in older PyTorch, arg only added if enabled
-            ddp_args['static_graph'] = True
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device], **ddp_args)
+            ddp_args["static_graph"] = True
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[device], **ddp_args
+        )
 
     # create optimizer and scaler
     optimizer = None
     scaler = None
 
-    if getattr(args,"train_data") or args.dataset_type in ["synthetic", "embedding"]:
+    if getattr(args, "train_data") or args.dataset_type in ["synthetic", "embedding"]:
 
-        exclude = lambda n, p: p.ndim < 2 or "bn" in n or "ln" in n or "bias" in n or 'logit_scale' in n
+        exclude = (
+            lambda n, p: p.ndim < 2
+            or "bn" in n
+            or "ln" in n
+            or "bias" in n
+            or "logit_scale" in n
+        )
         include = lambda n, p: not exclude(n, p)
 
         named_parameters = list(model.named_parameters())
         if args.optimizer == "lion":
             logging.info("Using Lion optimizer")
-            optimizer = Lion(model.parameters(), lr=args.lr, weight_decay=args.wd, betas=(args.beta1, args.beta2))
+            optimizer = Lion(
+                model.parameters(),
+                lr=args.lr,
+                weight_decay=args.wd,
+                betas=(args.beta1, args.beta2),
+            )
         else:
             logging.info("Using AdamW optimizer")
-            gain_or_bias_params = [p for n, p in named_parameters if exclude(n, p) and p.requires_grad]
-            rest_params = [p for n, p in named_parameters if include(n, p) and p.requires_grad]
+            gain_or_bias_params = [
+                p for n, p in named_parameters if exclude(n, p) and p.requires_grad
+            ]
+            rest_params = [
+                p for n, p in named_parameters if include(n, p) and p.requires_grad
+            ]
             optimizer = optim.AdamW(
                 [
-                    {"params": gain_or_bias_params, "weight_decay": 0.},
+                    {"params": gain_or_bias_params, "weight_decay": 0.0},
                     {"params": rest_params, "weight_decay": args.wd},
                 ],
                 lr=args.lr,
@@ -241,21 +261,23 @@ def main(args):
         scaler = torch.amp.GradScaler() if args.precision == "amp" else None
 
     # optionally resume from a checkpoint
-    
+
     if args.resume is not None:
-        checkpoint = pt_load(args.resume, map_location='cpu')
-        if 'epoch' in checkpoint:
+        checkpoint = pt_load(args.resume, map_location="cpu")
+        if "epoch" in checkpoint:
             # resuming a train checkpoint w/ epoch and optimizer state
             start_epoch = checkpoint["epoch"]
             sd = checkpoint["state_dict"]
-            if not args.distributed and next(iter(sd.items()))[0].startswith('module'):
-                sd = {k[len('module.'):]: v for k, v in sd.items()}
+            if not args.distributed and next(iter(sd.items()))[0].startswith("module"):
+                sd = {k[len("module.") :]: v for k, v in sd.items()}
             model.load_state_dict(sd)
             if optimizer is not None:
                 optimizer.load_state_dict(checkpoint["optimizer"])
-            if scaler is not None and 'scaler' in checkpoint:
-                scaler.load_state_dict(checkpoint['scaler'])
-            logging.info(f"=> resuming checkpoint '{args.resume}' (epoch {start_epoch})")
+            if scaler is not None and "scaler" in checkpoint:
+                scaler.load_state_dict(checkpoint["scaler"])
+            logging.info(
+                f"=> resuming checkpoint '{args.resume}' (epoch {start_epoch})"
+            )
         else:
             # loading a bare (model only) checkpoint for fine-tune or evaluation
             model.load_state_dict(checkpoint)
@@ -263,31 +285,43 @@ def main(args):
 
     # create scheduler if train
     scheduler = None
-    if 'train' in data and optimizer is not None:
-        total_steps = (data["train"].dataloader.num_batches // args.accum_freq) * args.epochs
+    if "train" in data and optimizer is not None:
+        total_steps = (
+            data["train"].dataloader.num_batches // args.accum_freq
+        ) * args.epochs
         args.warmup = math.ceil(0.1 * total_steps)
         if args.lr_scheduler == "cosine":
             scheduler = cosine_lr(optimizer, args.lr, args.warmup, total_steps)
         elif args.lr_scheduler == "const":
             scheduler = const_lr(optimizer, args.lr, args.warmup, total_steps)
         elif args.lr_scheduler == "const-cooldown":
-            assert args.epochs_cooldown is not None,\
-                "Please specify the number of cooldown epochs for this lr schedule."
-            cooldown_steps = (data["train"].dataloader.num_batches // args.accum_freq) * args.epochs_cooldown
+            assert (
+                args.epochs_cooldown is not None
+            ), "Please specify the number of cooldown epochs for this lr schedule."
+            cooldown_steps = (
+                data["train"].dataloader.num_batches // args.accum_freq
+            ) * args.epochs_cooldown
             scheduler = const_lr_cooldown(
-                optimizer, args.lr, args.warmup, total_steps,
-                cooldown_steps, args.lr_cooldown_power, args.lr_cooldown_end)
+                optimizer,
+                args.lr,
+                args.warmup,
+                total_steps,
+                cooldown_steps,
+                args.lr_cooldown_power,
+                args.lr_cooldown_end,
+            )
         else:
             logging.error(
-                f'Unknown scheduler, {args.lr_scheduler}. Available options are: cosine, const, const-cooldown.')
+                f"Unknown scheduler, {args.lr_scheduler}. Available options are: cosine, const, const-cooldown."
+            )
             exit(1)
 
     # determine if this worker should save logs and checkpoints. only do so if it is rank == 0
-    args.save_logs = args.logs and args.logs.lower() != 'none' and is_master(args)
+    args.save_logs = args.logs and args.logs.lower() != "none" and is_master(args)
 
     if args.wandb and is_master(args):
-        assert wandb is not None, 'Please install wandb.'
-        logging.debug('Starting wandb.')
+        assert wandb is not None, "Please install wandb."
+        logging.debug("Starting wandb.")
         args.train_sz = data["train"].dataloader.num_samples
         if args.val_data is not None:
             args.val_sz = data["val"].dataloader.num_samples
@@ -298,33 +332,35 @@ def main(args):
             id=args.name,
             notes=args.wandb_notes,
             tags=[],
-            resume='auto' if args.resume == "latest" else None,
+            resume="auto" if args.resume == "latest" else None,
             config=vars(args),
         )
         if args.debug:
-            wandb.watch(model, log='all')
+            wandb.watch(model, log="all")
         wandb.save(params_file)
-        logging.debug('Finished loading wandb.')
+        logging.debug("Finished loading wandb.")
 
     # Pytorch 2.0 adds '_orig_mod.' prefix to keys of state_dict() of compiled models.
     # For compatibility, we save state_dict() of the original model, which shares the
     # weights without the prefix.
     original_model = model
     if args.torchcompile:
-        logging.info('Compiling model...')
+        logging.info("Compiling model...")
         model = torch.compile(original_model)
-
 
     loss = create_loss(args)
 
     for epoch in range(start_epoch, args.epochs):
         if is_master(args):
-            logging.info(f'Start epoch {epoch}')
+            logging.info(f"Start epoch {epoch}")
 
         train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args)
         completed_epoch = epoch + 1
 
-        if 'val' in data and (args.val_frequency and ((epoch % args.val_frequency) == 0 or epoch == args.epochs)):
+        if "val" in data and (
+            args.val_frequency
+            and ((epoch % args.val_frequency) == 0 or epoch == args.epochs)
+        ):
             evaluate(model, data, loss, epoch, args)
         # Saving checkpoints.
         if args.save_logs:
@@ -345,14 +381,18 @@ def main(args):
                     os.path.join(args.checkpoint_path, f"epoch_{completed_epoch}.pt"),
                 )
             if args.delete_previous_checkpoint:
-                previous_checkpoint = os.path.join(args.checkpoint_path, f"epoch_{completed_epoch - 1}.pt")
+                previous_checkpoint = os.path.join(
+                    args.checkpoint_path, f"epoch_{completed_epoch - 1}.pt"
+                )
                 if os.path.exists(previous_checkpoint):
                     os.remove(previous_checkpoint)
 
             if args.save_most_recent:
                 # try not to corrupt the latest checkpoint if save fails
                 tmp_save_path = os.path.join(args.checkpoint_path, "tmp.pt")
-                latest_save_path = os.path.join(args.checkpoint_path, LATEST_CHECKPOINT_NAME)
+                latest_save_path = os.path.join(
+                    args.checkpoint_path, LATEST_CHECKPOINT_NAME
+                )
                 torch.save(checkpoint_dict, tmp_save_path)
                 os.replace(tmp_save_path, latest_save_path)
 
@@ -362,6 +402,7 @@ def main(args):
 
 def copy_codebase(args):
     from shutil import copytree, ignore_patterns
+
     new_code_path = os.path.join(args.logs, args.name, "code")
     if os.path.exists(new_code_path):
         print(
@@ -372,7 +413,9 @@ def copy_codebase(args):
     current_code_path = os.path.realpath(__file__)
     for _ in range(3):
         current_code_path = os.path.dirname(current_code_path)
-    copytree(current_code_path, new_code_path, ignore=ignore_patterns('log', 'logs', 'wandb'))
+    copytree(
+        current_code_path, new_code_path, ignore=ignore_patterns("log", "logs", "wandb")
+    )
     print("Done copying code.")
     return 1
 
