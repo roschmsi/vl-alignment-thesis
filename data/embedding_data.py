@@ -45,19 +45,19 @@ def load_vectors(embedding_dirs: list[str], hidden_states: bool = False,
         files.extend(natsorted(glob.glob(os.path.join(d, "*.pt"))))
 
     # TODO remove for full dataset
-    # files = files[:2000]
+    files = files[:2000]
 
     chunks = []
     with torch.no_grad():
         for file in tqdm(files, desc="Loading embedding data", unit="file"):
             x = torch.load(file, map_location="cpu", weights_only=True)  # [B, L, D] or [B, D]
-            x = extract_hidden_states(x) if hidden_states else x[..., -1]
+            # x = extract_hidden_states(x) if hidden_states else x[..., -1]
             if x.dtype is not dtype:
                 x = x.to(dtype)
-            # x = x.contiguous()  # only if you later require contiguous storage
+            # x = x.contiguous()
             x = x.clone()
-            chunks.append(x)      # keep as big blocks, not per-sample tensors
-    return torch.cat(chunks, dim=0)  # [N, D]
+            chunks.append(x)
+    return torch.cat(chunks, dim=0)
 
 class VLEmbeddingDataset(Dataset):
     def __init__(self, text_embedding_list, image_embedding_list, extra_text_embedding_list=None, train_num_samples=None, hidden_states=False):

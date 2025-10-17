@@ -610,6 +610,12 @@ def parse_args(args):
         type=float,
         help='Weight to balance contrastive and reconstruction loss.'
     )
+    parser.add_argument(
+        "--mmap",
+        default=False,
+        action="store_true",
+        help='Use representations stored in memory-mapped array.'
+    )
 
     args = parser.parse_args(args)
 
