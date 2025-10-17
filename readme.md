@@ -2,16 +2,17 @@
 
 ## Setup
 
-Setup conda environment using requirements.txt.
+Set up conda environment using requirements.txt.
 
 ```bash
 conda create -n ot_env python=3.11
 conda activate ot_env
+python -m pip install -r requirements.txt
 ```
 
 ## Download
 
-To download pixparse CC3M or CC12M datasets from huggingface in webdataset format, please use [download_hugginface.py](data_preparation/download_huggingface.py/). Set repo_id and local_dir at the top of the file.
+To download pixparse CC3M or CC12M datasets from huggingface in webdataset format, please use [download_huggingface.py](data_preparation/download_huggingface.py). Set repo_id and local_dir at the top of the file.
 
 SLURM script: [download_huggingface.sbatch](slurm/download_huggingface.sbatch)
 
@@ -25,24 +26,37 @@ wget https://huggingface.co/datasets/qidouxiong619/dreamlip_long_captions/resolv
 wget https://huggingface.co/datasets/qidouxiong619/dreamlip_long_captions/resolve/main/yfcc15m_3long_3short_1raw_captions_url.csv
 ```
 
-Use [match_image_caption.py](data_preparation/match_image_caption.py) to match the csv files and webdataset samples via URLs and create a new webdataset with these samples.
+Use [match_image_caption.py](data_preparation/match_image_caption.py) to match the csv files and webdataset samples via URLs. This will yield a new webdataset with each tar-file comprising 10,000 instances.
 
-SLURM script: 
+SLURM script: [match_image_caption.sbatch](slurm/match_image_caption.sbatch)
 
 ## Feature extraction
 
-Vision and text features can be extracted using [encode_wds.py](ot-alignment/encode_wds.py). Specify the name of the vision_model and text_model and the domain ("image", "text") for which you want to extract embeddings. Set the input_dir to the directory with the webdataset tar-files. To run encoding on multiple gpu's in parallel you can split the shards by using start_shard_index and enc_shard_index, e.g. run encoding from start_shard_index = 0 to end_shard_index=254 on GPU 0, from start_shard_index=255 to end_shard_index=511 on GPU 1, etc.
+Vision and text features can be extracted using [encode.py](encode.py). Specify the name of the vision_model and text_model and the domain ("image", "text") for which you want to extract embeddings. Set the input_dir to the directory with the webdataset tar-files. To run encoding on multiple gpu's in parallel (recommended for CC12M) you can split the shards by using start_shard_index and enc_shard_index, e.g. run encoding from start_shard_index = 0 to end_shard_index=254 on GPU 0, from start_shard_index=255 to end_shard_index=511 on GPU 1, etc.
 
-Example for CC3M:
+### Example Encoding Command
 
-SLURM script:
+```bash
+vision_model="facebook/dinov2-large"
+text_model="nvidia/NV-Embed-v2"
+data="cc3m"
+domain="image"
+batch_size=32
+source_caption="raw_caption"
+agg_mode="concat"
+input_dir="/lustre/groups/eml/projects/sroschmann/cc3m_recaptioned"
+output_dir="/lustre/groups/eml/projects/sroschmann/tensor_data"
+
+python /dss/dsshome1/07/ga27tus3/ot-alignment/encode.py --domain "$domain" --vision_model_name "$vision_model" --text_model_name "$text_model" --batch_size "$batch_size" --data "$data" --resume --source_caption "$source_caption" --agg_mode "$agg_mode" --input_dir "$input_dir" --output_dir "$output_dir" --num_workers 4
+```
+
+SLURM script: [encode.sbatch](slurm/encode.sbatch)
 
 ## Alignment
 
-To train for alignment of vision and text encoder, use 
-As proposed by SAIL, if we only align a single representation per modality, we can first load all vectors into memory, which will allow for very fast training iterations.
+We align a pretrained vision and language model using the extracted representations. Following the setup proposed by SAIL, if we only utilize a single representation per modality, we can first load all vectors into memory, which will afterwards allow for very fast training iterations. Provide the path to the text embeddings (--text_embedding_list). For maximum performance, you can extract additional positive representations in the previous step and use them during alignment (--extra_text_embedding_list). Login to your Weights & Biases account using `wandb login` prior to the start of the training.
 
-SLURM script: 
+SLURM script: [sail_train.sbatch](slurm/sail_train.sbatch)
 
 
 ## Evaluation
