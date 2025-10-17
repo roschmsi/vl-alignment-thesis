@@ -26,3 +26,6 @@ tokenizers==0.20.3
 tqdm==4.65.0
 transformers
 natsort
+webdataset
+einops
+wandb
