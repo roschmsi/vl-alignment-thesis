@@ -44,26 +44,30 @@ def get_embedding_dataset(
         hidden_states_img_idx=None,
         hidden_states_text_idx=None,
         metadata_path=None,
+        mmap=False,
     ):
     assert text_embedding_list and image_embedding_list, "Please provide text_embedding_list and image_embedding_list"
-    # dataset = VLEmbeddingDataset(
-    #     text_embedding_list,
-    #     image_embedding_list,
-    #     extra_text_embedding_list,
-    #     train_num_samples,
-    #     hidden_states,
-    # )
-    # TODO setup dataset based on mmap for hidden representations
-    dataset = MMAPDataset(
-        text_embedding_list=text_embedding_list,
-        image_embedding_list=image_embedding_list,
-        extra_text_embedding_list=extra_text_embedding_list,
-        metadata_path=metadata_path,
-        train_num_samples=train_num_samples,
-        hidden_states=hidden_states,
-        hidden_states_img_idx=hidden_states_img_idx,
-        hidden_states_text_idx=hidden_states_text_idx,
-    )
+
+    if mmap:
+        dataset = MMAPDataset(
+            text_embedding_list=text_embedding_list,
+            image_embedding_list=image_embedding_list,
+            extra_text_embedding_list=extra_text_embedding_list,
+            metadata_path=metadata_path,
+            train_num_samples=train_num_samples,
+            hidden_states=hidden_states,
+            hidden_states_img_idx=hidden_states_img_idx,
+            hidden_states_text_idx=hidden_states_text_idx,
+        )
+    else:
+        dataset = VLEmbeddingDataset(
+            text_embedding_list,
+            image_embedding_list,
+            extra_text_embedding_list,
+            train_num_samples,
+            hidden_states,
+        )
+    
     num_samples = len(dataset)
     sampler = DistributedSampler(dataset) if distributed and is_train else None
     shuffle = is_train and sampler is None
@@ -179,6 +183,7 @@ def get_data(args, epoch=0):
             hidden_states_img_idx=args.hidden_states_img_idx,
             hidden_states_text_idx=args.hidden_states_text_idx,
             metadata_path=args.metadata_path,
+            mmap=args.mmap,
         )
     else:
         raise ValueError(f"Unknown dataset type: {args.dataset_type}")
@@ -197,6 +202,7 @@ def get_data(args, epoch=0):
             hidden_states_img_idx=args.hidden_states_img_idx,
             hidden_states_text_idx=args.hidden_states_text_idx,
             metadata_path=args.metadata_path,
+            mmap=args.mmap,
         )
 
     return data

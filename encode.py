@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from torchvision import transforms
 
-from data.data_config import DATADIR
 from model import ImageEmbedding, SentenceEmbedding
 from train.logger import setup_logging
 import webdataset as wds
@@ -26,7 +25,7 @@ warnings.filterwarnings("ignore", message="WebDataset")
 def parse_args():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=str, required=True, help="Data type (key in DATADIR)")
+    parser.add_argument("--data", type=str, required=True, help="Data type")
     parser.add_argument("--vision_model_name", type=str, required=True, help="Model name")
     parser.add_argument("--text_model_name", type=str, required=True, help="Model name")
     parser.add_argument("--resume", action="store_true", help="Resume from existing embeddings")
@@ -183,12 +182,13 @@ def pil_collate_fn(batch):
 
 def main():
     args = parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
     
-    # data_path = f"/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m_recaptioned/cc3m-recaptioned-{{000000..000001}}.tar"
-    if args.data == "dreamclipcc3m":
+    if args.data == "cc3m":
         base_path = f"{args.input_dir}/cc3m-train-"
         max_shard_index = 282
-    elif args.data == "dreamclipcc12m":
+    elif args.data == "cc12m":
         base_path = f"{args.input_dir}/cc12m-train-"
         max_shard_index = 1001
     else:
