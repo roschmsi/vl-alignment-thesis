@@ -8,13 +8,10 @@ import pdb
 
 def generate_lookup_in_chunks(captions_csv_path, key_col, chunksize=100_000):
     print(f"Loading captions in chunks from: {captions_csv_path}")
-    
-    url_to_metadata_map = {}
-    # usecols = [key_col, value_col]
 
+    url_to_metadata_map = {}
     reader = pd.read_csv(
         captions_csv_path,
-        # usecols=usecols,
         dtype=str,
         chunksize=chunksize,
         engine='c'
@@ -24,20 +21,19 @@ def generate_lookup_in_chunks(captions_csv_path, key_col, chunksize=100_000):
     
     for chunk in tqdm(reader, desc="Building lookup map"):
         records = chunk.to_dict(orient='records')
-        
         chunk_map = {
             record[key_col]: {
                 k: v for k, v in record.items() if k != key_col
             }
             for record in records
-        }
-                
+        }   
         url_to_metadata_map.update(chunk_map)
 
     del reader
     gc.collect()
 
     print(f"Successfully built the map with {len(url_to_metadata_map):,} entries.")
+    
     return url_to_metadata_map
 
 def main():
@@ -46,22 +42,20 @@ def main():
                         help="Choose which dataset to process: cc3m or cc12m")
     parser.add_argument("--base_dir", default="/dss/mcmlscratch/07/ga27tus3",
                         help="Base directory containing datasets")
-    parser.add_argument("--source_caption", default="longSV_captions",
-                        help="Which caption column to use as source text")
     args = parser.parse_args()
 
     if args.dataset == "cc3m":
-        src_shard_pattern = f"{args.base_dir}/pixparse/cc3m/cc3m-train-{{0000..0575}}.tar"
+        src_shard_pattern = f"{args.base_dir}/cc3m/cc3m-train-{{0000..0575}}.tar"
         captions_csv_path = f"{args.base_dir}/cc3m_3long_3short_1raw_captions_url.csv"
-        out_dir = f"{args.base_dir}/pixparse/cc3m_recaptioned"
+        out_dir = f"{args.base_dir}/cc3m_recaptioned"
     elif args.dataset == "cc12m":
-        src_shard_pattern = f"{args.base_dir}/pixparse/cc12m/cc12m-train-{{0000..2175}}.tar"
+        src_shard_pattern = f"{args.base_dir}/cc12m/cc12m-train-{{0000..2175}}.tar"
         captions_csv_path = f"{args.base_dir}/cc12m_3long_3short_1raw_captions_url.csv"
-        out_dir = f"{args.base_dir}/pixparse/cc12m_recaptioned"
-    elif args.dataset == "yfcc15m":
-        src_shard_pattern = f"{args.base_dir}/pixparse/cc12m/cc12m-train-{{0000..2175}}.tar"
-        captions_csv_path = f"{args.base_dir}/cc12m_3long_3short_1raw_captions_url.csv"
-        out_dir = f"{args.base_dir}/pixparse/cc12m_recaptioned"
+        out_dir = f"{args.base_dir}/cc12m_recaptioned"
+    # elif args.dataset == "yfcc15m":
+    #     src_shard_pattern = f"{args.base_dir}/cc12m/cc12m-train-{{0000..2175}}.tar"
+    #     captions_csv_path = f"{args.base_dir}/cc12m_3long_3short_1raw_captions_url.csv"
+    #     out_dir = f"{args.base_dir}/cc12m_recaptioned"
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -70,7 +64,6 @@ def main():
     url_to_metadata_map = generate_lookup_in_chunks(
         captions_csv_path=captions_csv_path,
         key_col="Image Path", 
-        # value_col=args.source_caption,
         chunksize=500_000
     )
 
@@ -93,13 +86,6 @@ def main():
             if new_captions_data:
                 metadata.update(new_captions_data)
                 sample['json'] = metadata
-
-                # if args.source_caption is not None:
-                #     if args.source_caption in new_captions_data:
-                #         # sample['txt'] = new_captions_data[args.source_caption]
-                #         updated_count += 1
-                #         shard_writer.write(sample)
-                # else:
                 updated_count += 1
                 shard_writer.write(sample)
 
