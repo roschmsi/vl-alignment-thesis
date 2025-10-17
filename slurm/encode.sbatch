@@ -1,26 +1,28 @@
 #!/bin/bash
 #SBATCH --job-name="encode"
-#SBATCH -p mcml-hgx-h100-94x4,mcml-hgx-a100-80x4
-#SBATCH --qos=mcml
+#SBATCH --partition=gpu_p
+#SBATCH --qos=gpu_normal
+#SBATCH --mem=100G
+#SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --time=8:00:00
-#SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_encode.out
-#SBATCH -e /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_encode.err
+#SBATCH --constraint=h100_80gb
+#SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_encode.out
+#SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_encode.err
 
-source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
-conda activate sail_env_2
+source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
+conda activate ot_env
 
 vision_model="facebook/dinov2-large"
 text_model="nvidia/NV-Embed-v2"
-data="dreamclipcc12m"
-domain="image"
+data="cc3m"
+domain="text"
 batch_size=32
-source_caption="raw_caption"
+source_caption="shortSV_captions"
 agg_mode="concat"
-input_dir="/dss/mcmlscratch/07/ga27tus3/pixparse/cc3m"
-output_dir="/dss/mcmlscratch/07/ga27tus3"
+input_dir="/lustre/groups/eml/projects/sroschmann/cc3m_recaptioned"
+output_dir="/lustre/groups/eml/projects/sroschmann"
 
-python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode_wds.py \
+python /home/eml/simon.roschmann/ot-alignment/encode.py \
 --domain "$domain" \
 --vision_model_name "$vision_model" \
 --text_model_name "$text_model" \
@@ -31,8 +33,6 @@ python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode_wds.py \
 --agg_mode "$agg_mode" \
 --input_dir "$input_dir" \
 --output_dir "$output_dir" \
---output_hidden_states \
---downsample \
---num_workers 4 \
---start_shard_index 768
-# --end_shard_index 767
+--num_workers 4
+# --start_shard_index 0 \
+# --end_shard_index 254

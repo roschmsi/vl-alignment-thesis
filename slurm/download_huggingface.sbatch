@@ -1,15 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=download_images
-#SBATCH --partition=lrz-cpu
-#SBATCH --qos=cpu
+#SBATCH --partition=cpu_p
+#SBATCH --qos=cpu_normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --mem=100G
+#SBATCH --cpus-per-task=32
 #SBATCH --time=4:00:00
-#SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_download_hf.out
-#SBATCH -e /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_download_hf.err
+#SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_download_hf.out
+#SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_download_hf.err
 
-source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
-conda activate sail_env_2
+source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
+conda activate ot_env
 
-srun python /dss/dsshome1/07/ga27tus3/vision-language-alignment/data_preparation/download_huggingface.py
+srun python /home/eml/simon.roschmann/ot-alignment/data_preparation/download_huggingface.py \
+    --dataset cc3m \
+    --output-dir /lustre/groups/eml/projects/sroschmann/

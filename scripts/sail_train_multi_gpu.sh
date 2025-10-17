@@ -31,7 +31,7 @@ NUM_GPUS=2 # Or whatever you set it to
 
 torchrun --nproc_per_node=$NUM_GPUS \
     --master_port=$((10000 + $RANDOM % 50000)) \
-    /dss/dsshome1/07/ga27tus3/vision-language-alignment/main.py \
+    /dss/dsshome1/07/ga27tus3/ot-alignment/main.py \
     -- \
     --text-embedding-list $text_embedding_list \
     --extra-text-embedding-list $extra_text_embedding_list \
@@ -57,7 +57,7 @@ torchrun --nproc_per_node=$NUM_GPUS \
     --name $output_name \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
-    --logs /dss/mcmlscratch/07/ga27tus3/vision-language-alignment/logs 
+    --logs /dss/mcmlscratch/07/ga27tus3/ot-alignment/logs 
     # --distributed \
     # --world-size $NUM_GPUS \
     # ^^^ Move the '--logs' flag to be passed to your script, not torchrun itself.

@@ -66,10 +66,10 @@ if [ "$gpu_count" -eq 4 ]; then # If use multiple GPUs, please make sure the end
     echo "bash output: Using domain: $domain"
     echo "bash output: Each GPU will use save batch size of $batch_size"
     echo "bash output: Using source caption: $source_caption"
-    CUDA_VISIBLE_DEVICES=0 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --end_index 6144000 --source_caption $source_caption &
-    CUDA_VISIBLE_DEVICES=1 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 6144000 --end_index 12288000 --source_caption $source_caption &
-    CUDA_VISIBLE_DEVICES=2 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 12288000 --end_index 18432000 --source_caption $source_caption &
-    CUDA_VISIBLE_DEVICES=3 python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 18432000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=0 python /dss/dsshome1/07/ga27tus3/ot-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --end_index 6144000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=1 python /dss/dsshome1/07/ga27tus3/ot-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 6144000 --end_index 12288000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=2 python /dss/dsshome1/07/ga27tus3/ot-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 12288000 --end_index 18432000 --source_caption $source_caption &
+    CUDA_VISIBLE_DEVICES=3 python /dss/dsshome1/07/ga27tus3/ot-alignment/encode.py --domain $domain --vision_model_name $vision_model --text_model_name $text_model --batch_size $batch_size --data $data --resume --start_index 18432000 --source_caption $source_caption &
     wait
 else
     echo "bash output: Running tasks sequentially on a single GPU..."
@@ -79,7 +79,7 @@ else
     echo "bash output: Using domain: $domain"
     echo "bash output: Using batch size: $batch_size"
     echo "bash output: Using source caption: $source_caption"
-    python /dss/dsshome1/07/ga27tus3/vision-language-alignment/encode_wds.py \
+    python /dss/dsshome1/07/ga27tus3/ot-alignment/encode_wds.py \
     --domain $domain \
     --vision_model_name $vision_model \
     --text_model_name $text_model \

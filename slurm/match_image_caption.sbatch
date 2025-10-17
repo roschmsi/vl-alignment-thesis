@@ -1,13 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=match
-#SBATCH -p mcml-hgx-a100-80x4
-#SBATCH --qos=mcml
-#SBATCH --gres=gpu:1
+#SBATCH --job-name=match_image_caption
+#SBATCH --partition=cpu_p
+#SBATCH --qos=cpu_normal
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=100G
 #SBATCH --time=24:00:00
-#SBATCH -o /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_match.out
-#SBATCH -e /dss/dsshome1/07/ga27tus3/slurm/logs/slurm-%j_match.err
+#SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_match_images_caption.out
+#SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_match_images_caption.err
 
-source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
-conda activate sail_env_2
+source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
+conda activate ot_env
 
-srun python /dss/dsshome1/07/ga27tus3/vision-language-alignment/data_preparation/match_image_caption.py --dataset cc12m
+srun python /home/eml/simon.roschmann/ot-alignment/data_preparation/match_image_caption.py \
+    --dataset cc3m \
+    --base_dir /lustre/groups/eml/projects/sroschmann

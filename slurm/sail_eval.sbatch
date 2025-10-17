@@ -10,4 +10,4 @@
 source /dss/dsshome1/07/ga27tus3/miniconda3/etc/profile.d/conda.sh
 conda activate sail_env_2
 
-bash /dss/dsshome1/07/ga27tus3/vision-language-alignment/scripts/sail_eval.sh
+bash /dss/dsshome1/07/ga27tus3/ot-alignment/scripts/sail_eval.sh
