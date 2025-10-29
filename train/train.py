@@ -61,6 +61,123 @@ def backward(total_loss, scaler):
         total_loss.backward()
 
 
+def train_one_epoch_ot(model, data, loss, epoch, optimizer, scaler, scheduler, args):
+    device = torch.device(args.device)
+    autocast = get_autocast(args.precision)
+    input_dtype = get_input_dtype(args.precision)
+
+    model.train()
+
+    data["train"].set_epoch(epoch)
+    dataloader = data["train"].dataloader
+    num_batches_per_epoch = dataloader.num_batches // args.accum_freq
+    sample_digits = math.ceil(math.log(dataloader.num_samples + 1, 10))
+
+    losses_m = {}
+    batch_time_m = AverageMeter()
+    data_time_m = AverageMeter()
+    end = time.time()
+    for i, batch in enumerate(dataloader):
+        i_accum = i // args.accum_freq
+        step = num_batches_per_epoch * epoch + i_accum
+
+        if not args.skip_scheduler:
+            scheduler(step)
+
+        if len(batch) == 3:
+            texts, images, extra_texts = batch
+        else:
+            texts, images = batch
+            extra_texts = None
+        images = images.to(device=device, dtype=input_dtype, non_blocking=True)
+        texts = texts.to(device=device, non_blocking=True)
+
+        if extra_texts is not None:
+            extra_texts = extra_texts.to(
+                device=device, dtype=input_dtype, non_blocking=True
+            )
+        data_time_m.update(time.time() - end)
+        optimizer.zero_grad()
+
+        with autocast():
+            # TODO setup dataloader that can load paired and unpaired data
+            # TODO how should we handle extra text positives
+            is_pair = torch.ones(images.shape[0], dtype=torch.bool).to(device)
+            model_out = model(images, texts)
+            total_loss, logs = loss(
+                images,
+                texts,
+                model_out["image_features"],
+                model_out["text_features"],
+                is_pair,
+            )
+
+        backward(total_loss, scaler)
+
+        if scaler is not None:
+            if args.grad_clip_norm is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            if args.grad_clip_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
+            optimizer.step()
+
+        batch_time_m.update(time.time() - end)
+        end = time.time()
+        batch_count = i_accum + 1
+
+        if is_master(args) and (
+            i_accum % args.log_every_n_steps == 0
+            or batch_count == num_batches_per_epoch
+        ):
+            batch_size = len(images)
+            num_samples = batch_count * batch_size * args.accum_freq * args.world_size
+            samples_per_epoch = dataloader.num_samples
+            percent_complete = 100.0 * batch_count / num_batches_per_epoch
+
+            # NOTE loss is coarsely sampled, just master node and per log update
+            for key, val in logs.items():
+                if key not in losses_m:
+                    losses_m[key] = AverageMeter()
+                losses_m[key].update(val, batch_size)
+
+            loss_log = " ".join(
+                [
+                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})"
+                    for loss_name, loss_m in losses_m.items()
+                ]
+            )
+            logging.info(
+                f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
+                f"LR: {optimizer.param_groups[0]['lr']:5f} " + loss_log
+            )
+
+            # Save train loss / etc. Using non avg meter values as loggers have their own smoothing
+            log_data = {
+                "data_time": data_time_m.val,
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+            log_data.update({name: val.val for name, val in losses_m.items()})
+
+            log_data = {"train/" + name: val for name, val in log_data.items()}
+
+            if args.wandb:
+                assert wandb is not None, "Please install wandb."
+                log_data["step"] = step  # for backwards compatibility
+                wandb.log(log_data, step=step)
+
+            # resetting batch / data time meters per log window
+            batch_time_m.reset()
+            data_time_m.reset()
+
+
 def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args):
     device = torch.device(args.device)
     autocast = get_autocast(args.precision)

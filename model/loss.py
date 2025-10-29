@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import numpy as np
+
 try:
     import torch.distributed.nn
     from torch import distributed as dist
@@ -16,43 +17,55 @@ def z_score_normalize(features: torch.Tensor):
     std = features.std(dim=0, keepdim=True)
     return (features - mean) / std
 
+
 def multiply_off_diagonal(c_diff, lambda_value):
     """
     Multiply the off-diagonal elements of a dxd matrix by lambda.
-    
+
     Parameters:
     c_diff (torch.Tensor): The input square matrix (d x d).
     lambda_value (float): The scalar to multiply the off-diagonal elements by.
-    
+
     Returns:
     torch.Tensor: The modified matrix with off-diagonal elements multiplied by lambda.
     """
     # Create a mask for the off-diagonal elements
     d = c_diff.size(0)
     mask = ~torch.eye(d, dtype=bool, device=c_diff.device)  # Off-diagonal mask
-    
+
     # Multiply off-diagonal elements by lambda
     c_diff[mask] *= lambda_value
-    
+
     return c_diff
 
+
 def gather_features(
-        image_features,
-        text_features,
-        local_loss=False,
-        gather_with_grad=False,
-        rank=0,
-        world_size=1,
-        use_horovod=False
+    image_features,
+    text_features,
+    local_loss=False,
+    gather_with_grad=False,
+    rank=0,
+    world_size=1,
+    use_horovod=False,
 ):
-    assert has_distributed, 'torch.distributed did not import correctly, please use a PyTorch version with support.'
+    assert (
+        has_distributed
+    ), "torch.distributed did not import correctly, please use a PyTorch version with support."
     # We gather tensors from all gpus
     if gather_with_grad:
-        all_image_features = torch.cat(torch.distributed.nn.all_gather(image_features), dim=0)
-        all_text_features = torch.cat(torch.distributed.nn.all_gather(text_features), dim=0)
+        all_image_features = torch.cat(
+            torch.distributed.nn.all_gather(image_features), dim=0
+        )
+        all_text_features = torch.cat(
+            torch.distributed.nn.all_gather(text_features), dim=0
+        )
     else:
-        gathered_image_features = [torch.zeros_like(image_features) for _ in range(world_size)]
-        gathered_text_features = [torch.zeros_like(text_features) for _ in range(world_size)]
+        gathered_image_features = [
+            torch.zeros_like(image_features) for _ in range(world_size)
+        ]
+        gathered_text_features = [
+            torch.zeros_like(text_features) for _ in range(world_size)
+        ]
         dist.all_gather(gathered_image_features, image_features)
         dist.all_gather(gathered_text_features, text_features)
         if not local_loss:
@@ -68,13 +81,13 @@ def gather_features(
 class ClipLoss(nn.Module):
 
     def __init__(
-            self,
-            local_loss=False,
-            gather_with_grad=False,
-            cache_labels=False,
-            rank=0,
-            world_size=1,
-            use_horovod=False,
+        self,
+        local_loss=False,
+        gather_with_grad=False,
+        cache_labels=False,
+        rank=0,
+        world_size=1,
+        use_horovod=False,
     ):
         super().__init__()
         self.local_loss = local_loss
@@ -104,14 +117,22 @@ class ClipLoss(nn.Module):
     def get_logits(self, image_features, text_features, logit_scale):
         if self.world_size > 1:
             all_image_features, all_text_features = gather_features(
-                image_features, text_features,
-                self.local_loss, self.gather_with_grad, self.rank, self.world_size, self.use_horovod)
+                image_features,
+                text_features,
+                self.local_loss,
+                self.gather_with_grad,
+                self.rank,
+                self.world_size,
+                self.use_horovod,
+            )
 
             if self.local_loss:
                 logits_per_image = logit_scale * image_features @ all_text_features.T
                 logits_per_text = logit_scale * text_features @ all_image_features.T
             else:
-                logits_per_image = logit_scale * all_image_features @ all_text_features.T
+                logits_per_image = (
+                    logit_scale * all_image_features @ all_text_features.T
+                )
                 logits_per_text = logits_per_image.T
         else:
 
@@ -119,18 +140,28 @@ class ClipLoss(nn.Module):
             text_features = F.normalize(text_features, p=2, dim=-1)
             logits_per_image = logit_scale * image_features @ text_features.T
             logits_per_text = logit_scale * text_features @ image_features.T
-        
+
         return logits_per_image, logits_per_text
 
-    def forward(self, image_features, text_features, logit_scale=np.log(1 / 0.07), output_dict=False, *args, **kwargs):
+    def forward(
+        self,
+        image_features,
+        text_features,
+        logit_scale=np.log(1 / 0.07),
+        output_dict=False,
+        *args,
+        **kwargs
+    ):
         device = image_features.device
-        logits_per_image, logits_per_text = self.get_logits(image_features, text_features, logit_scale)
+        logits_per_image, logits_per_text = self.get_logits(
+            image_features, text_features, logit_scale
+        )
 
         labels = self.get_ground_truth(device, logits_per_image.shape[0])
 
         total_loss = (
-            F.cross_entropy(logits_per_image, labels) +
-            F.cross_entropy(logits_per_text, labels)
+            F.cross_entropy(logits_per_image, labels)
+            + F.cross_entropy(logits_per_text, labels)
         ) / 2
 
         return {"contrastive_loss": total_loss} if output_dict else total_loss
@@ -138,16 +169,16 @@ class ClipLoss(nn.Module):
 
 class CoCaLoss(ClipLoss):
     def __init__(
-            self,
-            caption_loss_weight,
-            clip_loss_weight,
-            pad_id=0,  # pad_token for open_clip custom tokenizer
-            local_loss=False,
-            gather_with_grad=False,
-            cache_labels=False,
-            rank=0,
-            world_size=1,
-            use_horovod=False,
+        self,
+        caption_loss_weight,
+        clip_loss_weight,
+        pad_id=0,  # pad_token for open_clip custom tokenizer
+        local_loss=False,
+        gather_with_grad=False,
+        cache_labels=False,
+        rank=0,
+        world_size=1,
+        use_horovod=False,
     ):
         super().__init__(
             local_loss=local_loss,
@@ -155,17 +186,25 @@ class CoCaLoss(ClipLoss):
             cache_labels=cache_labels,
             rank=rank,
             world_size=world_size,
-            use_horovod=use_horovod
+            use_horovod=use_horovod,
         )
 
         self.clip_loss_weight = clip_loss_weight
         self.caption_loss_weight = caption_loss_weight
         self.caption_loss = nn.CrossEntropyLoss(ignore_index=pad_id)
 
-    def forward(self, image_features, text_features, logits, labels, logit_scale, output_dict=False):
-        
+    def forward(
+        self,
+        image_features,
+        text_features,
+        logits,
+        labels,
+        logit_scale,
+        output_dict=False,
+    ):
+
         clip_loss = torch.tensor(0)
-        
+
         if self.clip_loss_weight:
             clip_loss = super().forward(image_features, text_features, logit_scale)
             clip_loss = self.clip_loss_weight * clip_loss
@@ -185,34 +224,40 @@ class CoCaLoss(ClipLoss):
 class DistillClipLoss(ClipLoss):
 
     def dist_loss(self, teacher_logits, student_logits):
-        return -(teacher_logits.softmax(dim=1) * student_logits.log_softmax(dim=1)).sum(dim=1).mean(dim=0)
+        return (
+            -(teacher_logits.softmax(dim=1) * student_logits.log_softmax(dim=1))
+            .sum(dim=1)
+            .mean(dim=0)
+        )
 
     def forward(
-            self,
-            image_features,
-            text_features,
-            logit_scale,
-            dist_image_features,
-            dist_text_features,
-            dist_logit_scale,
-            output_dict=False,
+        self,
+        image_features,
+        text_features,
+        logit_scale,
+        dist_image_features,
+        dist_text_features,
+        dist_logit_scale,
+        output_dict=False,
     ):
-        logits_per_image, logits_per_text = \
-            self.get_logits(image_features, text_features, logit_scale)
+        logits_per_image, logits_per_text = self.get_logits(
+            image_features, text_features, logit_scale
+        )
 
-        dist_logits_per_image, dist_logits_per_text = \
-            self.get_logits(dist_image_features, dist_text_features, dist_logit_scale)
+        dist_logits_per_image, dist_logits_per_text = self.get_logits(
+            dist_image_features, dist_text_features, dist_logit_scale
+        )
 
         labels = self.get_ground_truth(image_features.device, logits_per_image.shape[0])
 
         contrastive_loss = (
-            F.cross_entropy(logits_per_image, labels) +
-            F.cross_entropy(logits_per_text, labels)
+            F.cross_entropy(logits_per_image, labels)
+            + F.cross_entropy(logits_per_text, labels)
         ) / 2
 
         distill_loss = (
-            self.dist_loss(dist_logits_per_image, logits_per_image) +
-            self.dist_loss(dist_logits_per_text, logits_per_text)
+            self.dist_loss(dist_logits_per_image, logits_per_image)
+            + self.dist_loss(dist_logits_per_text, logits_per_text)
         ) / 2
 
         if output_dict:
@@ -241,7 +286,9 @@ def neighbour_exchange(from_rank, to_rank, tensor, group=None):
     return tensor_recv
 
 
-def neighbour_exchange_bidir(left_rank, right_rank, tensor_to_left, tensor_to_right, group=None):
+def neighbour_exchange_bidir(
+    left_rank, right_rank, tensor_to_left, tensor_to_right, group=None
+):
     tensor_from_left = torch.zeros_like(tensor_to_right)
     tensor_from_right = torch.zeros_like(tensor_to_left)
     send_op_left = torch.distributed.P2POp(
@@ -268,7 +315,9 @@ def neighbour_exchange_bidir(left_rank, right_rank, tensor_to_left, tensor_to_ri
         right_rank,
         group=group,
     )
-    reqs = torch.distributed.batch_isend_irecv([send_op_right, send_op_left, recv_op_right, recv_op_left])
+    reqs = torch.distributed.batch_isend_irecv(
+        [send_op_right, send_op_left, recv_op_right, recv_op_left]
+    )
     for req in reqs:
         req.wait()
     return tensor_from_right, tensor_from_left
@@ -284,7 +333,9 @@ class NeighbourExchange(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        return (None, None, None) + (NeighbourExchange.apply(ctx.to_rank, ctx.from_rank, ctx.group, grad_output),)
+        return (None, None, None) + (
+            NeighbourExchange.apply(ctx.to_rank, ctx.from_rank, ctx.group, grad_output),
+        )
 
 
 def neighbour_exchange_with_grad(from_rank, to_rank, tensor, group=None):
@@ -297,20 +348,27 @@ class NeighbourExchangeBidir(torch.autograd.Function):
         ctx.group = group
         ctx.left_rank = left_rank
         ctx.right_rank = right_rank
-        return neighbour_exchange_bidir(left_rank, right_rank, tensor_to_left, tensor_to_right, group=group)
+        return neighbour_exchange_bidir(
+            left_rank, right_rank, tensor_to_left, tensor_to_right, group=group
+        )
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        return (None, None, None) + \
-            NeighbourExchangeBidir.apply(ctx.right_rank, ctx.left_rank, ctx.group, *grad_outputs)
+        return (None, None, None) + NeighbourExchangeBidir.apply(
+            ctx.right_rank, ctx.left_rank, ctx.group, *grad_outputs
+        )
 
 
-def neighbour_exchange_bidir_with_grad(left_rank, right_rank, tensor_to_left, tensor_to_right, group=None):
-    return NeighbourExchangeBidir.apply(left_rank, right_rank, group, tensor_to_left, tensor_to_right)
+def neighbour_exchange_bidir_with_grad(
+    left_rank, right_rank, tensor_to_left, tensor_to_right, group=None
+):
+    return NeighbourExchangeBidir.apply(
+        left_rank, right_rank, group, tensor_to_left, tensor_to_right
+    )
 
 
 class SigLipLoss(nn.Module):
-    """ Sigmoid Loss for Language Image Pre-Training (SigLIP) - https://arxiv.org/abs/2303.15343
+    """Sigmoid Loss for Language Image Pre-Training (SigLIP) - https://arxiv.org/abs/2303.15343
 
     @article{zhai2023sigmoid,
       title={Sigmoid loss for language image pre-training},
@@ -319,14 +377,15 @@ class SigLipLoss(nn.Module):
       year={2023}
     }
     """
+
     def __init__(
-            self,
-            cache_labels=False,
-            rank=0,
-            world_size=1,
-            bidir=True,
-            use_horovod=False,
-            diagonal_weight:float = 0.0,
+        self,
+        cache_labels=False,
+        rank=0,
+        world_size=1,
+        bidir=True,
+        use_horovod=False,
+        diagonal_weight: float = 0.0,
     ):
         super().__init__()
         self.cache_labels = cache_labels
@@ -346,7 +405,6 @@ class SigLipLoss(nn.Module):
         labels = 2 * torch.eye(num_logits, device=device, dtype=dtype) + labels
         return labels
 
-    
     def random_mask(self, v1, v2, r: float):
         """
         随机从每个向量中挑选 k 个维度，同时保证梯度传导
@@ -358,97 +416,128 @@ class SigLipLoss(nn.Module):
         assert v1.shape == v2.shape, "两个张量的形状必须相同"
         n, d = v1.shape
         k = int(d * r)
-        
+
         # 获取 v1 所在设备
         device = v1.device
-        
+
         # 在相同的设备上生成随机索引
-        indices = torch.randperm(d, device=device)[:k]  # 从 d 中随机选择 k 个不重复的索引
+        indices = torch.randperm(d, device=device)[
+            :k
+        ]  # 从 d 中随机选择 k 个不重复的索引
         # 选取对应维度
         selected_v1 = v1[:, indices]  # 使用高级索引选择维度
         selected_v2 = v2[:, indices]
-        
+
         return selected_v1, selected_v2
 
-    
     def get_logits(self, image_features, text_features, logit_scale, logit_bias=None):
         logits = logit_scale * image_features @ text_features.T
         if logit_bias is not None:
             logits += logit_bias
         return logits
-    
-    def _loss(self, image_features, text_features, extra_text_features, logit_scale, logit_bias=None, logits_per_text=None, negative_only=False):
+
+    def _loss(
+        self,
+        image_features,
+        text_features,
+        extra_text_features,
+        logit_scale,
+        logit_bias=None,
+        logits_per_text=None,
+        negative_only=False,
+    ):
 
         if self.world_size > 1:
             image_features, text_features = gather_features(
-                image_features, text_features,
-                local_loss=False, 
+                image_features,
+                text_features,
+                local_loss=False,
                 gather_with_grad=False,
                 rank=self.rank,
                 world_size=self.world_size,
-                use_horovod=self.use_horovod
+                use_horovod=self.use_horovod,
             )
 
             # 2. Gather EXTRA text features if they exist
             if extra_text_features is not None:
-                dummy_zeros = torch.zeros_like(image_features[:extra_text_features.shape[0]])
-                
+                dummy_zeros = torch.zeros_like(
+                    image_features[: extra_text_features.shape[0]]
+                )
+
                 _, extra_text_features = gather_features(
                     dummy_zeros,
                     extra_text_features,
-                    local_loss=False, 
+                    local_loss=False,
                     gather_with_grad=False,
                     rank=self.rank,
                     world_size=self.world_size,
-                    use_horovod=self.use_horovod
+                    use_horovod=self.use_horovod,
                 )
 
         image_features = F.normalize(image_features, p=2, dim=-1)
         text_features = F.normalize(text_features, p=2, dim=-1)
-      
+
         if logits_per_text is not None:
             logits = logits_per_text
         else:
-            logits = self.get_logits(image_features, text_features, logit_scale, logit_bias)
+            logits = self.get_logits(
+                image_features, text_features, logit_scale, logit_bias
+            )
 
         labels = self.get_ground_truth(
-            image_features.device,
-            image_features.dtype,
-            image_features.shape[0]
+            image_features.device, image_features.dtype, image_features.shape[0]
         )
 
-        if labels.shape!= logits.shape:
+        if labels.shape != logits.shape:
             breakpoint()
 
-        loss = F.logsigmoid(labels * logits) # N, N
-
+        loss = F.logsigmoid(labels * logits)  # N, N
 
         with torch.no_grad():
             diag_loss = torch.diagonal(loss).sum()
-            positive_loss = -diag_loss/(image_features.shape[0]*image_features.shape[0])
-            negative_loss = -(loss.sum() - diag_loss) / (image_features.shape[0]*image_features.shape[0])
+            positive_loss = -diag_loss / (
+                image_features.shape[0] * image_features.shape[0]
+            )
+            negative_loss = -(loss.sum() - diag_loss) / (
+                image_features.shape[0] * image_features.shape[0]
+            )
 
         output = {"positive_loss": positive_loss, "negative_loss": negative_loss}
 
-      
-        #Solution 2: images contrast to all extra text features
+        # Solution 2: images contrast to all extra text features
         if extra_text_features is not None:
             extra_text_features = F.normalize(extra_text_features, p=2, dim=-1)
-            extra_logits = self.get_logits(image_features, extra_text_features, logit_scale, logit_bias)
+            extra_logits = self.get_logits(
+                image_features, extra_text_features, logit_scale, logit_bias
+            )
             extra_loss = F.logsigmoid(labels * extra_logits)
             output["extra_loss"] = -torch.mean(extra_loss)
             loss = torch.cat([loss, extra_loss], dim=1)
-        
 
         output["contrastive_loss"] = -torch.mean(loss)
 
         return output
 
+    def forward(
+        self,
+        image_features,
+        text_features,
+        extra_text_features,
+        logit_scale,
+        logit_bias,
+        logits_per_text=None,
+        output_dict=False,
+        **kwargs
+    ):
 
-
-    def forward(self, image_features, text_features, extra_text_features, logit_scale, logit_bias, logits_per_text=None, output_dict=False, **kwargs):
-       
-        loss = self._loss(image_features, text_features, extra_text_features, logit_scale, logit_bias, logits_per_text)
+        loss = self._loss(
+            image_features,
+            text_features,
+            extra_text_features,
+            logit_scale,
+            logit_bias,
+            logits_per_text,
+        )
         # if self.world_size > 1:
         #     # exchange text features w/ neighbour world_size - 1 times
         #     right_rank = (self.rank + 1) % self.world_size
@@ -499,16 +588,17 @@ class SigLipLoss(nn.Module):
         #                 negative_only=True,
         #             )
         #             text_features_to_right = text_features_from_left
-        return loss if output_dict else loss['contrastive_loss']
+        return loss if output_dict else loss["contrastive_loss"]
         # return {"contrastive_loss": loss, "loss_high_temp": loss_high_temp, "loss_low_temp": loss_low_temp} if output_dict else loss
+
 
 class BarlowTwinsLoss(nn.Module):
     def __init__(
-            self,
-            cache_labels=False,
-            rank=0,
-            world_size=1,
-            lambda_param:float = 0.0051,
+        self,
+        cache_labels=False,
+        rank=0,
+        world_size=1,
+        lambda_param: float = 0.0051,
     ):
         super().__init__()
         self.cache_labels = cache_labels
@@ -524,20 +614,22 @@ class BarlowTwinsLoss(nn.Module):
         """
         Implement the barlow twins loss
         """
-        image_features = z_score_normalize(image_features) # N, d
-        text_features = z_score_normalize(text_features) # N, d
-        
+        image_features = z_score_normalize(image_features)  # N, d
+        text_features = z_score_normalize(text_features)  # N, d
+
         # cross-model correlation matrix mm(z_a_norm.T, z_b_norm) / N
-        ccm = image_features.T @ text_features / image_features.shape[0] # d, d
+        ccm = image_features.T @ text_features / image_features.shape[0]  # d, d
 
         # loss
-        c_diff = (ccm - torch.eye(ccm.shape[0], dtype=ccm.dtype, device=ccm.device)).pow(2)
+        c_diff = (
+            ccm - torch.eye(ccm.shape[0], dtype=ccm.dtype, device=ccm.device)
+        ).pow(2)
         # multiply off-diagonal elems of c_diff by lambda
         c_diff = multiply_off_diagonal(c_diff, self.lambda_param)
 
         loss = c_diff.sum()
         return loss
-    
+
     def forward(self, image_features, text_features, output_dict=False, **kwargs):
         # Normalize features
         loss = self._barlowtwins_loss(image_features, text_features)

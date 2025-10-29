@@ -652,6 +652,60 @@ def parse_args(args):
         action="store_true",
         help="Use representations stored in memory-mapped array.",
     )
+    parser.add_argument(
+        "--hdf5",
+        default=False,
+        action="store_true",
+        help="Use representations stored in HDF5 format.",
+    )
+    parser.add_argument(
+        "--ot",
+        default=False,
+        action="store_true",
+        help="Use optimal transport based alignment loss.",
+    )
+    parser.add_argument(
+        "--sinkhorn",
+        default=False,
+        action="store_true",
+        help="Use Sinkhorn algorithm for OT computation.",
+    )
+    parser.add_argument(
+        "--alpha_supervised_explicit",
+        default=0,
+        type=float,
+        help="Weight for OT loss",
+    )
+    parser.add_argument(
+        "--alpha_supervised_implicit",
+        default=0,
+        type=float,
+        help="Weight for OT loss",
+    )
+    parser.add_argument(
+        "--alpha_marginal",
+        default=0,
+        type=float,
+        help="Weight for OT loss",
+    )
+    parser.add_argument(
+        "--alpha_unsupervised",
+        default=0,
+        type=float,
+        help="Weight for OT loss",
+    )
+    parser.add_argument(
+        "--epsilon",
+        default=0.01,
+        type=float,
+        help="OT matching model",
+    )
+    parser.add_argument(
+        "--n_iters_sinkhorn",
+        default=5,
+        type=int,
+        help="OT Sinkhorn iterations",
+    )
 
     args = parser.parse_args(args)
 

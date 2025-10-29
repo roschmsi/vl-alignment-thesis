@@ -1,3 +1,4 @@
+from optimal_transport.matching import BasicMatchingModel, SinkhornMatchingModel
 from .sail_model import AlignmentLayer, SAILModel, ShareLockAlignmentLayer
 from .loss import ClipLoss, SigLipLoss, BarlowTwinsLoss
 from .vision_model import ImageEmbedding
@@ -29,27 +30,27 @@ def get_cast_dtype(precision: str):
 
 
 def create_model(
-        text_model_name:Optional[str] = None, 
-        vision_model_name:Optional[str] = None, 
-        head_weights_path:Optional[str] = None,
-        vision_dimesion:int = 1536,
-        text_dimension:int = 768,
-        target_dimension:int = 512,
-        precision: str = 'fp32', 
-        device: Union[str, torch.device] = 'cpu', 
-        linear_type: str = 'star',
-        logit_scale: float = 20.0,
-        logit_bias: float = -10.0,
-        agg_mode: str = 'concat',
-        width_factor: int = 8,
-        sharelock: bool = False,
-        hidden_states: bool = False,
-        hidden_states_img_idx = None,
-        hidden_states_text_idx = None,
-        reconstruction: bool = False,
-        reconstruction_type = "linear",
-        downsample=False,
-):  
+    text_model_name: Optional[str] = None,
+    vision_model_name: Optional[str] = None,
+    head_weights_path: Optional[str] = None,
+    vision_dimesion: int = 1536,
+    text_dimension: int = 768,
+    target_dimension: int = 512,
+    precision: str = "fp32",
+    device: Union[str, torch.device] = "cpu",
+    linear_type: str = "star",
+    logit_scale: float = 20.0,
+    logit_bias: float = -10.0,
+    agg_mode: str = "concat",
+    width_factor: int = 8,
+    sharelock: bool = False,
+    hidden_states: bool = False,
+    hidden_states_img_idx=None,
+    hidden_states_text_idx=None,
+    reconstruction: bool = False,
+    reconstruction_type="linear",
+    downsample=False,
+):
     if isinstance(device, str):
         device = torch.device(device)
 
@@ -58,12 +59,12 @@ def create_model(
     cast_dtype = get_cast_dtype(precision)
     if vision_model_name is not None and text_model_name is not None:
         model = SAILModel(
-            text_model_name=text_model_name, 
-            vision_model_name=vision_model_name, 
-            target_dimension=target_dimension, 
-            vlhead_weights_path=head_weights_path, 
-            linear_type=linear_type, 
-            cast_dtype=cast_dtype, 
+            text_model_name=text_model_name,
+            vision_model_name=vision_model_name,
+            target_dimension=target_dimension,
+            vlhead_weights_path=head_weights_path,
+            linear_type=linear_type,
+            cast_dtype=cast_dtype,
             agg_mode=agg_mode,
             width_factor=width_factor,
             sharelock=sharelock,
@@ -73,14 +74,14 @@ def create_model(
             downsample=downsample,
         )
     else:
-       model = LayerClass(
-            vision_dimesion, 
-            text_dimension, 
-            target_dimension, 
-            linear_type=linear_type, 
-            cast_dtype=cast_dtype, 
-            logit_scale=logit_scale, 
-            logit_bias=logit_bias, 
+        model = LayerClass(
+            vision_dimesion,
+            text_dimension,
+            target_dimension,
+            linear_type=linear_type,
+            cast_dtype=cast_dtype,
+            logit_scale=logit_scale,
+            logit_bias=logit_bias,
             width_factor=width_factor,
             hidden_states=hidden_states,
             reconstruction=reconstruction,
@@ -91,7 +92,21 @@ def create_model(
 
 
 def create_loss(args):
-    if args.siglip:
+    if args.ot:
+        # TODO introduce parameters here
+        loss_config = {
+            "epsilon": args.epsilon,
+            "n_iters_sinkhorn": args.n_iters_sinkhorn,
+            "alpha_supervised_explicit": args.alpha_supervised_explicit,
+            "alpha_supervised_implicit": args.alpha_supervised_implicit,
+            "alpha_marginal": args.alpha_marginal,
+            "alpha_unsupervised": args.alpha_unsupervised,
+        }
+        if args.sinkhorn:
+            return SinkhornMatchingModel(loss_config)
+        else:
+            return BasicMatchingModel(loss_config)
+    elif args.siglip:
         print("Using SigLip loss")
         return SigLipLoss(
             rank=args.rank,
