@@ -196,7 +196,7 @@ def main(args):
     # eval
     if args.task.lower() == "imagenetv1":
         # Check if the ImageNet folders exist, if not create them and download the data
-        imagenet_dir = os.path.join(args.dataset_root_dir, "imagenet")
+        imagenet_dir = os.path.join("/lustre/groups/eml/datasets", "imagenet")
         if not os.path.exists(imagenet_dir):
             os.makedirs(imagenet_dir)
             print(f"Created directory: {imagenet_dir}")

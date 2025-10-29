@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=h100_80gb
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=28
 #SBATCH --time=24:00:00
 #SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_train_alignment.out
 #SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_train_alignment.err

@@ -1,21 +1,21 @@
 #!/bin/bash
 
 epoch_num=20
-lr=1e-5
+lr=1e-3
 bs=32768
 d=1024
 width_factor=8
 logit_scale=20
 logit_bias=-10
 
-text_embedding_list="/lustre/groups/eml/projects/sroschmann/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption"
-# extra_text_embedding_list="/dss/mcmlscratch/07/ga27tus3/mmap_data/NV-Embed-v2/dreamclipcc12m_shortSV_captions.mmap"
-image_embedding_list="/lustre/groups/eml/projects/sroschmann/tensor_data/image_embedding/dinov2-large/cc3m_concat"
-# metadata_path="/dss/mcmlscratch/07/ga27tus3/mmap_data/metadata.pt"
-output_name="sail_dinov2l_nv2_cc3m_raw_full"
+text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption.h5"
+extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
+image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat.h5"
+output_name="sail_dinov2l_nv2_cc3m_raw_hdf5_32k_ot_sinkhorn_lr=1e-4_only_supervised_implicit"
 
 python /home/eml/simon.roschmann/ot-alignment/main.py \
     --text-embedding-list $text_embedding_list \
+    --extra-text-embedding-list $extra_text_embedding_list \
     --image-embedding-list $image_embedding_list \
     --val-frequency 1 \
     --dataset-type embedding \
@@ -26,20 +26,28 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --batch-size $bs \
     --lr $lr \
     --epochs $epoch_num \
-    --workers 8 \
+    --workers 24 \
     --optimizer lion \
     --siglip \
     --wd 1e-7 \
     --target-dimension $d \
-    --linear-type star \
+    --linear-type linear \
     --log-every-n-steps 5 \
     --wandb-project-name sail_train \
     --name $output_name \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
-    --logs /lustre/groups/eml/projects/sroschmann/logs
+    --logs /lustre/groups/eml/projects/sroschmann/logs \
+    --hdf5 \
+    --ot \
+    --sinkhorn \
+    --epsilon 0.01 \
+    --n_iters_sinkhorn 5 \
+    --alpha_supervised_explicit 0 \
+    --alpha_supervised_implicit 1 \
+    --alpha_marginal 0 \
+    --alpha_unsupervised 0
     # --extra-text-embedding-list $extra_text_embedding_list \
-    # --metadata-path $metadata_path \
 
 
 if [ $? -ne 0 ]; then

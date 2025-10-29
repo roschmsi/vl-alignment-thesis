@@ -3,7 +3,7 @@
 #SBATCH --partition=gpu_p
 #SBATCH --qos=gpu_normal
 #SBATCH --mem=100G
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --constraint=h100_80gb
 #SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_encode.out
@@ -17,10 +17,10 @@ text_model="nvidia/NV-Embed-v2"
 data="cc3m"
 domain="text"
 batch_size=32
-source_caption="shortSV_captions"
+source_caption="longSV_captions"
 agg_mode="concat"
 input_dir="/lustre/groups/eml/projects/sroschmann/cc3m_recaptioned"
-output_dir="/lustre/groups/eml/projects/sroschmann"
+output_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment"
 
 python /home/eml/simon.roschmann/ot-alignment/encode.py \
 --domain "$domain" \
@@ -34,5 +34,5 @@ python /home/eml/simon.roschmann/ot-alignment/encode.py \
 --input_dir "$input_dir" \
 --output_dir "$output_dir" \
 --num_workers 4
-# --start_shard_index 0 \
-# --end_shard_index 254
+# --start_shard_index 256
+# --end_shard_index 255
