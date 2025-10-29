@@ -1,4 +1,11 @@
-from .embedding_data import VLEmbeddingDataset, MMAPDataset, custom_collate_fn, BatchedLazyDataset, batched_collate_fn
+from .embedding_data import (
+    H5EmbeddingDataset,
+    VLEmbeddingDataset,
+    MMAPDataset,
+    custom_collate_fn,
+    BatchedLazyDataset,
+    batched_collate_fn,
+)
 from torch.utils.data.distributed import DistributedSampler
 from dataclasses import dataclass
 from multiprocessing import Value
@@ -8,15 +15,17 @@ from natsort import natsorted
 import glob
 import os
 
+
 class SharedEpoch:
     def __init__(self, epoch: int = 0):
-        self.shared_epoch = Value('i', epoch)
+        self.shared_epoch = Value("i", epoch)
 
     def set_value(self, epoch):
         self.shared_epoch.value = epoch
 
     def get_value(self):
         return self.shared_epoch.value
+
 
 @dataclass
 class DataInfo:
@@ -31,22 +40,26 @@ class DataInfo:
         if self.sampler is not None and isinstance(self.sampler, DistributedSampler):
             self.sampler.set_epoch(epoch)
 
+
 def get_embedding_dataset(
-        text_embedding_list,
-        image_embedding_list,
-        extra_text_embedding_list,
-        workers,
-        batch_size,
-        train_num_samples = None,
-        is_train = True,
-        distributed=False,
-        hidden_states=False,
-        hidden_states_img_idx=None,
-        hidden_states_text_idx=None,
-        metadata_path=None,
-        mmap=False,
-    ):
-    assert text_embedding_list and image_embedding_list, "Please provide text_embedding_list and image_embedding_list"
+    text_embedding_list,
+    image_embedding_list,
+    extra_text_embedding_list,
+    workers,
+    batch_size,
+    train_num_samples=None,
+    is_train=True,
+    distributed=False,
+    hidden_states=False,
+    hidden_states_img_idx=None,
+    hidden_states_text_idx=None,
+    metadata_path=None,
+    mmap=False,
+    hdf5=False,
+):
+    assert (
+        text_embedding_list and image_embedding_list
+    ), "Please provide text_embedding_list and image_embedding_list"
 
     if mmap:
         dataset = MMAPDataset(
@@ -54,6 +67,16 @@ def get_embedding_dataset(
             image_embedding_list=image_embedding_list,
             extra_text_embedding_list=extra_text_embedding_list,
             metadata_path=metadata_path,
+            train_num_samples=train_num_samples,
+            hidden_states=hidden_states,
+            hidden_states_img_idx=hidden_states_img_idx,
+            hidden_states_text_idx=hidden_states_text_idx,
+        )
+    elif hdf5:
+        dataset = H5EmbeddingDataset(
+            text_embedding_list=text_embedding_list,
+            image_embedding_list=image_embedding_list,
+            extra_text_embedding_list=extra_text_embedding_list,
             train_num_samples=train_num_samples,
             hidden_states=hidden_states,
             hidden_states_img_idx=hidden_states_img_idx,
@@ -67,7 +90,7 @@ def get_embedding_dataset(
             train_num_samples,
             hidden_states,
         )
-    
+
     num_samples = len(dataset)
     sampler = DistributedSampler(dataset) if distributed and is_train else None
     shuffle = is_train and sampler is None
@@ -86,8 +109,15 @@ def get_embedding_dataset(
     dataloader.num_samples = num_samples
     dataloader.num_batches = len(dataloader)
 
-
-    return DataInfo(dataloader, sampler, data_info={'num_samples': num_samples, 'visual_dim': dataset.visual_dim, 'text_dim': dataset.text_dim})
+    return DataInfo(
+        dataloader,
+        sampler,
+        data_info={
+            "num_samples": num_samples,
+            "visual_dim": dataset.visual_dim,
+            "text_dim": dataset.text_dim,
+        },
+    )
 
 
 # def get_embedding_dataset(
@@ -141,7 +171,7 @@ def get_embedding_dataset(
 
 #     num_samples = dataset.get_total_samples()
 #     visual_dim, text_dim = dataset.get_dimensions()
-    
+
 #     sampler = DistributedSampler(dataset) if distributed and is_train else None
 #     shuffle = is_train and sampler is None
 
@@ -157,7 +187,7 @@ def get_embedding_dataset(
 #     )
 #     dataloader.num_samples = num_samples
 #     dataloader.num_batches = len(dataloader)
-    
+
 #     data_info_dict = {
 #         'num_samples': num_samples,
 #         'visual_dim': visual_dim,
@@ -165,12 +195,12 @@ def get_embedding_dataset(
 #     }
 
 #     return DataInfo(dataloader, sampler, data_info=data_info_dict)
-    
+
 
 def get_data(args, epoch=0):
     data = {}
     if args.text_embedding_list and args.image_embedding_list:
-        data['train'] = get_embedding_dataset(
+        data["train"] = get_embedding_dataset(
             args.text_embedding_list,
             args.image_embedding_list,
             args.extra_text_embedding_list,
@@ -184,18 +214,19 @@ def get_data(args, epoch=0):
             hidden_states_text_idx=args.hidden_states_text_idx,
             metadata_path=args.metadata_path,
             mmap=args.mmap,
+            hdf5=args.hdf5,
         )
     else:
         raise ValueError(f"Unknown dataset type: {args.dataset_type}")
-    
+
     if args.val_text_embedding_list and args.val_image_embedding_list:
-        data['val'] = get_embedding_dataset(
+        data["val"] = get_embedding_dataset(
             args.val_text_embedding_list,
             args.val_image_embedding_list,
-            extra_text_embedding_list = None,
+            extra_text_embedding_list=None,
             workers=args.workers,
             batch_size=args.batch_size,
-            train_num_samples = None,
+            train_num_samples=None,
             is_train=False,
             distributed=args.distributed,
             hidden_states=args.hidden_states,
@@ -203,8 +234,7 @@ def get_data(args, epoch=0):
             hidden_states_text_idx=args.hidden_states_text_idx,
             metadata_path=args.metadata_path,
             mmap=args.mmap,
+            hdf5=args.hdf5,
         )
 
     return data
-
-

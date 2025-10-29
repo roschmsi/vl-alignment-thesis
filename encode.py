@@ -1,20 +1,17 @@
-import csv
-import json
 import logging
 import os
 import time
 import warnings
-import itertools
+import numpy as np
 
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from torchvision import transforms
 
 from model import ImageEmbedding, SentenceEmbedding
 from train.logger import setup_logging
 import webdataset as wds
-import pdb
+import h5py
 
 setup_logging(log_file=None, level=logging.INFO)
 warnings.filterwarnings("ignore", message="Corrupt EXIF data")
@@ -131,61 +128,212 @@ def process_batch_from_loader(
     resume,
     downsample=False,
     throughput=False,
+    hdf5_path=None,
 ):
-    idx = start_index // batch_size
-    total_time = 0
+    """
+    Stream embeddings into a single HDF5 file at hdf5_path.
+    Creates dataset lazily on first batch (so we know feature shape).
+    Supports resume by appending to existing dataset.
+    """
+    assert hdf5_path is not None, "hdf5_path must be provided"
+    os.makedirs(os.path.dirname(hdf5_path), exist_ok=True)
+
+    # State
+    total_time = 0.0
     total_samples = 0
+    global_write_index = 0  # how many rows already persisted
+    h5f = None
+    dset = None
+
+    # If resuming, open + read current shape
+    if resume and os.path.exists(hdf5_path):
+        h5f = h5py.File(hdf5_path, "r+")
+        if "embeddings" in h5f:
+            dset = h5f["embeddings"]
+            global_write_index = dset.shape[0]
+            logging.info(f"Resuming HDF5 at row {global_write_index}.")
+        else:
+            # File exists but no dataset; treat as fresh
+            h5f.close()
+            h5f = None
+
+    # For consuming batches we’ve already written (if resume),
+    # we’ll simply keep counting and skip writing until we've passed
+    # global_write_index samples.
+    skipped_so_far = 0
+
+    # Iterate
     for batch_data in tqdm(data_loader, desc="Encoding Batches"):
-        output_path = os.path.join(output_dir, f"{idx}.pt")
-        if resume and os.path.exists(output_path):
-            idx += 1
-            continue
-        start_time = time.time()
+        # Forward pass
+        start_t = time.time()
         with torch.cuda.amp.autocast():
             with torch.no_grad():
-                batch_embeddings = model_func(batch_data).cpu()
-        end_time = time.time()
-        batch_time = end_time - start_time
-        num_samples_in_batch = (
+                batch_embeddings = model_func(batch_data)  # torch.Tensor
+        end_t = time.time()
+
+        # Bookkeeping
+        num_in_batch = (
             len(batch_data) if isinstance(batch_data, list) else batch_data.size(0)
         )
+        batch_time = end_t - start_t
         total_time += batch_time
-        total_samples += num_samples_in_batch
-        current_throughput = num_samples_in_batch / batch_time
-        avg_throughput = total_samples / total_time
+        total_samples += num_in_batch
 
-        # TODO check that there is only a single downsampling step
+        # Optional downsample along last dim (your current behavior)
         if downsample:
             L = batch_embeddings.shape[-1]
             start = (L - 1) % 3
-            batch_embeddings = batch_embeddings[:, :, start::3]
-
-        if throughput:
-            logging.info(
-                f"Batch {idx} throughput: {current_throughput:.2f} samples/sec, Avg: {avg_throughput:.2f} samples/sec"
+            batch_embeddings = (
+                batch_embeddings[:, :, start::3]
+                if batch_embeddings.ndim >= 2
+                else batch_embeddings
             )
-        else:
-            batch_embeddings = batch_embeddings.half()
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            torch.save(batch_embeddings, output_path)
-        idx += 1
+
+        # Throughput-only mode: skip saving entirely
+        if throughput:
+            current_tp = num_in_batch / max(batch_time, 1e-8)
+            avg_tp = total_samples / max(total_time, 1e-8)
+            logging.info(
+                f"Batch throughput: {current_tp:.2f} samples/sec, Avg: {avg_tp:.2f} samples/sec"
+            )
+            continue
+
+        # Convert dtype to float16 (to match original .half() saving)
+        emb_np = batch_embeddings.detach().to("cpu").numpy().astype(np.float16)
+
+        # Lazy create file + dataset once we know feature shape
+        if h5f is None:
+            h5f = h5py.File(hdf5_path, "w")
+            # Feature shape per sample (exclude batch dimension)
+            feat_shape = emb_np.shape[1:]
+            # Pick a reasonable chunk size (≤ 4096 rows, ≥ 1)
+            chunk_rows = min(max(1, len(emb_np)), 4096)
+            dset = h5f.create_dataset(
+                "embeddings",
+                shape=(0, *feat_shape),
+                maxshape=(None, *feat_shape),
+                chunks=(chunk_rows, *feat_shape),
+                dtype=np.float16,
+                compression="gzip",
+                compression_opts=1,
+            )
+            # Metadata (optional but handy)
+            dset.attrs["created"] = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+            dset.attrs["start_index"] = start_index
+            dset.attrs["batch_size"] = batch_size
+            logging.info(
+                f"Created HDF5 dataset with per-sample shape {feat_shape} at {hdf5_path}."
+            )
+
+        # If resuming and we have already-written rows, skip writing until we catch up
+        if skipped_so_far < global_write_index:
+            # How many rows from this batch should be skipped?
+            remaining_to_skip = global_write_index - skipped_so_far
+            if remaining_to_skip >= num_in_batch:
+                skipped_so_far += num_in_batch
+                # still not caught up; skip entire batch
+                continue
+            else:
+                # Partially skip; write the tail of the batch
+                emb_np = emb_np[remaining_to_skip:]
+                skipped_so_far += remaining_to_skip
+                num_in_batch = emb_np.shape[0]
+                if num_in_batch == 0:
+                    continue  # nothing to write this iteration
+
+        # Resize and append
+        old_n = dset.shape[0]
+        new_n = old_n + num_in_batch
+        dset.resize((new_n, *dset.shape[1:]))
+        dset[old_n:new_n] = emb_np
+
+        # Optional: flush periodically for safety
+        if new_n % (batch_size * 10) == 0:
+            h5f.flush()
+
+        # Log throughput
+        current_tp = (emb_np.shape[0]) / max(batch_time, 1e-8)
+        avg_tp = total_samples / max(total_time, 1e-8)
+        logging.info(
+            f"Saved rows [{old_n}:{new_n}) — batch throughput: {current_tp:.2f} samples/sec, Avg: {avg_tp:.2f} samples/sec"
+        )
+
+    if (not throughput) and (h5f is not None):
+        h5f.flush()
+        h5f.close()
+
     if total_samples > 0 and total_time > 0:
-        final_throughput = total_samples / total_time
-        logging.info(f"Final average throughput: {final_throughput:.2f} samples/sec")
+        final_tp = total_samples / total_time
+        logging.info(f"Final average throughput: {final_tp:.2f} samples/sec")
         logging.info(f"Total processing time: {total_time:.2f} seconds")
         logging.info(f"Total samples processed: {total_samples}")
+
+
+# def process_batch_from_loader(
+#     data_loader,
+#     model_func,
+#     start_index,
+#     batch_size,
+#     output_dir,
+#     resume,
+#     downsample=False,
+#     throughput=False,
+# ):
+#     idx = start_index // batch_size
+#     total_time = 0
+#     total_samples = 0
+#     for batch_data in tqdm(data_loader, desc="Encoding Batches"):
+#         output_path = os.path.join(output_dir, f"{idx}.pt")
+#         if resume and os.path.exists(output_path):
+#             idx += 1
+#             continue
+#         start_time = time.time()
+#         with torch.cuda.amp.autocast():
+#             with torch.no_grad():
+#                 batch_embeddings = model_func(batch_data).cpu()
+#         end_time = time.time()
+#         batch_time = end_time - start_time
+#         num_samples_in_batch = (
+#             len(batch_data) if isinstance(batch_data, list) else batch_data.size(0)
+#         )
+#         total_time += batch_time
+#         total_samples += num_samples_in_batch
+#         current_throughput = num_samples_in_batch / batch_time
+#         avg_throughput = total_samples / total_time
+
+#         # TODO check that there is only a single downsampling step
+#         if downsample:
+#             L = batch_embeddings.shape[-1]
+#             start = (L - 1) % 3
+#             batch_embeddings = batch_embeddings[:, :, start::3]
+
+#         if throughput:
+#             logging.info(
+#                 f"Batch {idx} throughput: {current_throughput:.2f} samples/sec, Avg: {avg_throughput:.2f} samples/sec"
+#             )
+#         else:
+#             batch_embeddings = batch_embeddings.half()
+#             os.makedirs(os.path.dirname(output_path), exist_ok=True)
+#             torch.save(batch_embeddings, output_path)
+#         idx += 1
+#     if total_samples > 0 and total_time > 0:
+#         final_throughput = total_samples / total_time
+#         logging.info(f"Final average throughput: {final_throughput:.2f} samples/sec")
+#         logging.info(f"Total processing time: {total_time:.2f} seconds")
+#         logging.info(f"Total samples processed: {total_samples}")
 
 
 @torch.no_grad()
 def encode_text(args, data_loader, start_index):
     model_name = args.text_model_name.split("/")[-1]
-    save_suffix = args.save_name if args.save_name else ""
     output_dir = os.path.join(
         f"{args.output_dir}/tensor_data/text_embedding",
         model_name,
-        f"{args.data}_{args.source_caption}_{save_suffix}".strip("_"),
     )
     print(f"Output directory: {output_dir}")
+
+    hdf5_path = os.path.join(output_dir, f"{args.data}_{args.source_caption}.h5")
+
     model = SentenceEmbedding(
         args.text_model_name, output_hidden_states=args.output_hidden_states
     )
@@ -204,6 +352,7 @@ def encode_text(args, data_loader, start_index):
         args.resume,
         args.downsample,
         args.throughput,
+        hdf5_path=hdf5_path,
     )
 
 
@@ -213,9 +362,10 @@ def encode_image(args, data_loader, start_index):
     output_dir = os.path.join(
         f"{args.output_dir}/tensor_data/image_embedding",
         model_name,
-        f"{args.data}_{args.agg_mode}",
     )
     print(f"Output directory: {output_dir}")
+
+    hdf5_path = os.path.join(output_dir, f"{args.data}_{args.agg_mode}.h5")
 
     # Instantiate the model from your custom class
     model = ImageEmbedding(
@@ -238,6 +388,7 @@ def encode_image(args, data_loader, start_index):
         args.resume,
         args.downsample,
         args.throughput,
+        hdf5_path=hdf5_path,
     )
 
 

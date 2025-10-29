@@ -7,6 +7,8 @@ from natsort import natsorted
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 import pdb
+import h5py
+from bisect import bisect_right
 
 
 def custom_collate_fn(batch):
@@ -252,6 +254,203 @@ class MMAPDataset(Dataset):
             return torch.from_numpy(txt), torch.from_numpy(img), torch.from_numpy(extra)
 
         return torch.from_numpy(txt), torch.from_numpy(img)
+
+
+class H5EmbeddingDataset(Dataset):
+    def __init__(
+        self,
+        text_embedding_list,
+        image_embedding_list,
+        extra_text_embedding_list,
+        train_num_samples=None,
+        hidden_states=False,
+        hidden_states_img_idx=None,
+        hidden_states_text_idx=None,
+        h5_key: str = "embeddings",
+    ):
+        super().__init__()
+
+        self.hidden_states = hidden_states
+        self.hidden_states_text_idx = hidden_states_text_idx
+        self.hidden_states_img_idx = hidden_states_img_idx
+        self.h5_key = h5_key
+
+        self.text_paths = list(text_embedding_list or [])
+        self.image_paths = list(image_embedding_list or [])
+        self.extra_text_paths = list(extra_text_embedding_list or [])
+
+        assert (
+            len(self.text_paths) > 0
+        ), "text_embedding_list must contain at least one .h5 path"
+        assert (
+            len(self.image_paths) > 0
+        ), "image_embedding_list must contain at least one .h5 path"
+
+        if self.extra_text_paths:
+            assert len(self.extra_text_paths) > 0
+
+        def _scan(paths):
+            lens, shapes = [], []
+            for p in paths:
+                with h5py.File(p, "r") as f:
+                    d = f[self.h5_key]
+                    lens.append(d.shape[0])
+                    shapes.append(d.shape[1:])
+            return lens, shapes
+
+        txt_lens, txt_shapes = _scan(self.text_paths)
+        img_lens, img_shapes = _scan(self.image_paths)
+        if self.extra_text_paths:
+            xt_lens, xt_shapes = _scan(self.extra_text_paths)
+        else:
+            xt_lens, xt_shapes = None, None
+
+        def _all_equal(xs):
+            return all(x == xs[0] for x in xs)
+
+        assert _all_equal(
+            txt_shapes
+        ), f"text feature shapes differ across files: {txt_shapes}"
+        assert _all_equal(
+            img_shapes
+        ), f"image feature shapes differ across files: {img_shapes}"
+
+        if self.extra_text_paths:
+            assert _all_equal(
+                xt_shapes
+            ), f"extra-text feature shapes differ across files: {xt_shapes}"
+
+        self._txt_cumlens = np.cumsum([0] + txt_lens)
+        self._img_cumlens = np.cumsum([0] + img_lens)
+        if self.extra_text_paths:
+            self._xt_cumlens = np.cumsum([0] + xt_lens)
+        else:
+            self._xt_cumlens = None
+
+        txt_total = int(self._txt_cumlens[-1])
+        img_total = int(self._img_cumlens[-1])
+        xt_total = int(self._xt_cumlens[-1]) if self._xt_cumlens is not None else None
+
+        # Alignment assumption: 1:1 across modalities at the sample level
+        # If your text is a multiple of images (repeated image rows), build files that already reflect that.
+        assert (
+            txt_total == img_total
+        ), f"Global lengths differ (text={txt_total}, image={img_total}). Make them aligned."
+        if xt_total is not None:
+            assert (
+                xt_total == txt_total
+            ), f"Global lengths differ (extra_text={xt_total}, text={txt_total})."
+
+        self.num_samples = txt_total
+        vision_shape = img_shapes[0]
+        text_shape = txt_shapes[0]
+
+        self.image_num = img_total
+        self.text_num = txt_total
+        self.visual_dim = vision_shape[0] if len(vision_shape) >= 1 else 1
+        self.text_dim = text_shape[0] if len(text_shape) >= 1 else 1
+
+        if self.hidden_states:
+            if self.hidden_states_img_idx:
+                self.visual_dim *= len(self.hidden_states_img_idx)
+            else:
+                self.visual_dim *= 3
+            if self.hidden_states_text_idx:
+                self.text_dim *= len(self.hidden_states_text_idx)
+            else:
+                self.text_dim *= 3
+
+        # Lazy-open file handles/datasets (per worker)
+        self._txt_files = [None] * len(self.text_paths)
+        self._img_files = [None] * len(self.image_paths)
+        self._xt_files = (
+            [None] * len(self.extra_text_paths) if self.extra_text_paths else None
+        )
+
+        self._txt_dsets = [None] * len(self.text_paths)
+        self._img_dsets = [None] * len(self.image_paths)
+        self._xt_dsets = (
+            [None] * len(self.extra_text_paths) if self.extra_text_paths else None
+        )
+
+    def __len__(self):
+        return self.num_samples
+
+    # ---- utils ----
+    @staticmethod
+    def _locate(cumlens, idx):
+        # find file j such that cumlens[j] ≤ idx < cumlens[j+1]
+        j = int(bisect_right(cumlens, idx) - 1)
+        local = idx - int(cumlens[j])
+        return j, local
+
+    def _ensure_open(self, which: str, j: int):
+        if which == "txt":
+            if self._txt_dsets[j] is None:
+                f = h5py.File(self.text_paths[j], "r")
+                self._txt_files[j] = f
+                self._txt_dsets[j] = f[self.h5_key]
+        elif which == "img":
+            if self._img_dsets[j] is None:
+                f = h5py.File(self.image_paths[j], "r")
+                self._img_files[j] = f
+                self._img_dsets[j] = f[self.h5_key]
+        elif which == "xt":
+            if self._xt_dsets[j] is None:
+                f = h5py.File(self.extra_text_paths[j], "r")
+                self._xt_files[j] = f
+                self._xt_dsets[j] = f[self.h5_key]
+        else:
+            raise ValueError(which)
+
+    def __getitem__(self, idx):
+        # Locate in each modality using the same global index
+        j_txt, i_txt = self._locate(self._txt_cumlens, idx)
+        self._ensure_open("txt", j_txt)
+        txt = np.ascontiguousarray(self._txt_dsets[j_txt][i_txt])
+
+        j_img, i_img = self._locate(self._img_cumlens, idx)
+        self._ensure_open("img", j_img)
+        img = np.ascontiguousarray(self._img_dsets[j_img][i_img])
+
+        # print("text shape:", txt.shape)
+        # print("image shape:", img.shape)
+
+        if self.hidden_states:
+            img = extract_hidden_states(img, self.hidden_states_img_idx)
+            txt = extract_hidden_states(txt, self.hidden_states_text_idx)
+        # else:
+        #     # Keep your original last-token logic
+        #     # currently only the last representation is saved during encoding
+
+        #     img = img[:, -1]
+        #     txt = txt[:, -1]
+
+        if self.extra_text_paths:
+            j_xt, i_xt = self._locate(self._xt_cumlens, idx)
+            self._ensure_open("xt", j_xt)
+            extra = np.ascontiguousarray(self._xt_dsets[j_xt][i_xt])
+
+            if self.hidden_states:
+                extra = extract_hidden_states(extra, self.hidden_states_text_idx)
+            # else:
+            #     extra = extra[:, -1]
+
+            return torch.from_numpy(txt), torch.from_numpy(img), torch.from_numpy(extra)
+
+        return torch.from_numpy(txt), torch.from_numpy(img)
+
+    def close(self):
+        for arr in (self._txt_files, self._img_files, self._xt_files or []):
+            for f in arr:
+                try:
+                    if f is not None:
+                        f.close()
+                except Exception:
+                    pass
+
+    def __del__(self):
+        self.close()
 
 
 def batched_collate_fn(batch):
