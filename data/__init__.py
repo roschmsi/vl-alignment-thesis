@@ -1,5 +1,6 @@
 from .embedding_data import (
     H5EmbeddingDataset,
+    H5EmbeddingIterableDataset,
     VLEmbeddingDataset,
     MMAPDataset,
     custom_collate_fn,
@@ -73,11 +74,10 @@ def get_embedding_dataset(
             hidden_states_text_idx=hidden_states_text_idx,
         )
     elif hdf5:
-        dataset = H5EmbeddingDataset(
+        dataset = H5EmbeddingIterableDataset(
             text_embedding_list=text_embedding_list,
             image_embedding_list=image_embedding_list,
             extra_text_embedding_list=extra_text_embedding_list,
-            train_num_samples=train_num_samples,
             hidden_states=hidden_states,
             hidden_states_img_idx=hidden_states_img_idx,
             hidden_states_text_idx=hidden_states_text_idx,
@@ -93,17 +93,15 @@ def get_embedding_dataset(
 
     num_samples = len(dataset)
     sampler = DistributedSampler(dataset) if distributed and is_train else None
-    shuffle = is_train and sampler is None
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
         collate_fn=custom_collate_fn,
-        shuffle=shuffle,
         num_workers=workers,
         pin_memory=False,
         prefetch_factor=1,
-        persistent_workers=False,
-        sampler=sampler,
+        persistent_workers=(workers > 0),
+        sampler=None,
         drop_last=is_train,
     )
     dataloader.num_samples = num_samples
