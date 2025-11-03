@@ -1,4 +1,4 @@
-from optimal_transport.matching import BasicMatchingModel, SinkhornMatchingModel
+from optimal_transport.matching import FullMatchingModel
 from .sail_model import AlignmentLayer, SAILModel, ShareLockAlignmentLayer
 from .loss import ClipLoss, SigLipLoss, BarlowTwinsLoss
 from .vision_model import ImageEmbedding
@@ -93,19 +93,27 @@ def create_model(
 
 def create_loss(args):
     if args.ot:
-        # TODO introduce parameters here
         loss_config = {
-            "epsilon": args.epsilon,
-            "n_iters_sinkhorn": args.n_iters_sinkhorn,
+            "divergence": args.divergence,
+            # Loss weights
+            "alpha_marginal": args.alpha_marginal,
+            "alpha_supervised_sail": args.alpha_supervised_sail,
             "alpha_supervised_explicit": args.alpha_supervised_explicit,
             "alpha_supervised_implicit": args.alpha_supervised_implicit,
-            "alpha_marginal": args.alpha_marginal,
+            "alpha_semisupervised_ot": args.alpha_semisupervised_ot,
+            "alpha_semisupervised_div": args.alpha_semisupervised_div,
             "alpha_unsupervised": args.alpha_unsupervised,
+            # Sinkhorn params
+            "epsilon_sinkhorn_shared": args.epsilon_sinkhorn_shared,
+            "n_iters_sinkhorn_shared": args.n_iters_sinkhorn_shared,
+            "epsilon_sinkhorn_anchor": args.epsilon_sinkhorn_anchor,
+            "n_iters_sinkhorn_anchor": args.n_iters_sinkhorn_anchor,
+            # SAIL
+            "temperature_sail": args.temperature_sail,
+            "bias_sail": args.bias_sail,
         }
-        if args.sinkhorn:
-            return SinkhornMatchingModel(loss_config)
-        else:
-            return BasicMatchingModel(loss_config)
+        return FullMatchingModel(loss_config)
+
     elif args.siglip:
         print("Using SigLip loss")
         return SigLipLoss(

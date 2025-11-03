@@ -25,8 +25,7 @@ class Processor:
         if isinstance(outputs, torch.Tensor):
             return outputs[0]
         else:
-            return outputs['pixel_values'][0]
-
+            return outputs["pixel_values"][0]
 
 
 def accuracy(output, target, topk=(1,)):
@@ -52,7 +51,7 @@ def zeroshot_classifier(
     zeroshot_weights = []
     backbone_path = save_backbone_classifier_features_path
 
-    with torch.amp.autocast(device_type='cuda'):
+    with torch.amp.autocast(device_type="cuda"):
         with torch.no_grad():
             if os.path.exists(backbone_path):
                 print(f"Loading backbone features {backbone_path} for classifier")
@@ -75,15 +74,15 @@ def zeroshot_classifier(
                         texts, padding=True, truncation=True, return_tensors="pt"
                     ).to(device)
                     class_embeddings, class_features = model.encode_text(
-                            tokens, text_list = texts, return_encoded=True
-                        )
+                        tokens, text_list=texts, return_encoded=True
+                    )
                     pre_encode_model_features[classname] = class_features.cpu()
                     class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
                     class_embedding = class_embeddings.mean(dim=0)
                     class_embedding /= class_embedding.norm()
                     zeroshot_weights.append(class_embedding)
                 os.makedirs(os.path.dirname(backbone_path), exist_ok=True)
-                # torch.save(pre_encode_model_features, backbone_path)
+                torch.save(pre_encode_model_features, backbone_path)
 
             zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device)
 
@@ -96,7 +95,7 @@ def extract_and_save_backbone_features(
     top1, top5, n = 0.0, 0.0, 0.0
     pre_encode_image_features = {}
 
-    with torch.amp.autocast(device_type='cuda'):
+    with torch.amp.autocast(device_type="cuda"):
         with torch.no_grad():
             for images, target, image_name in tqdm(dataloader):
                 images, target = images.to(device), target.to(device)
@@ -117,7 +116,7 @@ def extract_and_save_backbone_features(
                 top5 += acc5
                 n += images.size(0)
 
-        # save_features(pre_encode_image_features, save_path)
+        save_features(pre_encode_image_features, save_path)
 
     return top1, top5, n
 
@@ -132,7 +131,7 @@ def evaluate_from_saved_features(
         if i % batch_size == 0:
             batched_pre_encode_image_features[i // batch_size] = {}
         batched_pre_encode_image_features[i // batch_size][key] = value
-    with torch.amp.autocast(device_type='cuda'):
+    with torch.amp.autocast(device_type="cuda"):
         with torch.no_grad():
             for batch in tqdm(batched_pre_encode_image_features.values()):
                 encoded_features, targets = [], []
@@ -143,7 +142,9 @@ def evaluate_from_saved_features(
                 encoded_features = torch.stack(encoded_features).to(device)
                 targets = torch.stack(targets).to(device)
 
-                image_features = model.encode_image(encoded_features, is_pre_encoded=True)
+                image_features = model.encode_image(
+                    encoded_features, is_pre_encoded=True
+                )
                 image_features /= image_features.norm(dim=-1, keepdim=True)
                 logits = 100.0 * image_features @ zeroshot_weights
 
@@ -176,7 +177,8 @@ def imagenet_eval(
             save_dir, f"{vision_model_name}/imagenet.pt"
         )
         save_backbone_classifier_features_path = os.path.join(
-            save_dir, f"{text_model_name}/classifier.pt")
+            save_dir, f"{text_model_name}/classifier.pt"
+        )
 
     model.eval()
     device = get_model_device(model)
@@ -194,28 +196,28 @@ def imagenet_eval(
         text_model_name,
     )
 
-    # if not os.path.exists(save_backbone_features_path):
-    print("Extracting backbone features")
-    if version == "v1":
-        images_dataset = ImageNetWithPaths(
-            root=images_dir, split="val", transform=processor
+    if not os.path.exists(save_backbone_features_path):
+        print("Extracting backbone features")
+        if version == "v1":
+            images_dataset = ImageNetWithPaths(
+                root=images_dir, split="val", transform=processor
+            )
+        else:
+            images_dataset = ImageNetV2Dataset(
+                variant="matched-frequency", transform=processor, location=images_dir
+            )
+        loader = torch.utils.data.DataLoader(
+            images_dataset, batch_size=bs, num_workers=2
+        )
+        top1, top5, n = extract_and_save_backbone_features(
+            model, device, loader, save_backbone_features_path, zeroshot_weights
         )
     else:
-        images_dataset = ImageNetV2Dataset(
-        variant="matched-frequency", transform=processor, location=images_dir
-    )
-    loader = torch.utils.data.DataLoader(
-        images_dataset, batch_size=bs, num_workers=2
-    )
-    top1, top5, n = extract_and_save_backbone_features(
-        model, device, loader, save_backbone_features_path, zeroshot_weights
-    )
-    # else:
-    #     print(f"Loading backbone image features from {save_backbone_features_path}")
-    #     pre_encode_image_features = load_features(save_backbone_features_path)
-    #     top1, top5, n = evaluate_from_saved_features(
-    #         model, device, pre_encode_image_features, bs, zeroshot_weights
-    #     )
+        print(f"Loading backbone image features from {save_backbone_features_path}")
+        pre_encode_image_features = load_features(save_backbone_features_path)
+        top1, top5, n = evaluate_from_saved_features(
+            model, device, pre_encode_image_features, bs, zeroshot_weights
+        )
 
     top1 = (top1 / n) * 100
     top5 = (top5 / n) * 100
@@ -223,4 +225,3 @@ def imagenet_eval(
     print(f"Top-5 accuracy: {top5:.2f}")
 
     return {"top1": top1, "top5": top5}
-

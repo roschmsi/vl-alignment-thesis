@@ -658,6 +658,7 @@ def parse_args(args):
         action="store_true",
         help="Use representations stored in HDF5 format.",
     )
+    # OT losses
     parser.add_argument(
         "--ot",
         default=False,
@@ -665,10 +666,15 @@ def parse_args(args):
         help="Use optimal transport based alignment loss.",
     )
     parser.add_argument(
-        "--sinkhorn",
-        default=False,
-        action="store_true",
-        help="Use Sinkhorn algorithm for OT computation.",
+        "--alpha_marginal",
+        default=0,
+        type=float,
+        help="Weight for OT loss",
+    )
+    parser.add_argument(
+        "--alpha_supervised_sail",
+        type=float,
+        default=0.0,
     )
     parser.add_argument(
         "--alpha_supervised_explicit",
@@ -683,10 +689,14 @@ def parse_args(args):
         help="Weight for OT loss",
     )
     parser.add_argument(
-        "--alpha_marginal",
-        default=0,
+        "--alpha_semisupervised_ot",
         type=float,
-        help="Weight for OT loss",
+        default=0.0,
+    )
+    parser.add_argument(
+        "--alpha_semisupervised_div",
+        type=float,
+        default=0.0,
     )
     parser.add_argument(
         "--alpha_unsupervised",
@@ -695,16 +705,41 @@ def parse_args(args):
         help="Weight for OT loss",
     )
     parser.add_argument(
-        "--epsilon",
+        "--epsilon_sinkhorn_anchor",
         default=0.01,
         type=float,
         help="OT matching model",
     )
     parser.add_argument(
-        "--n_iters_sinkhorn",
-        default=5,
+        "--n_iters_sinkhorn_anchor",
+        default=100,
         type=int,
         help="OT Sinkhorn iterations",
+    )
+    parser.add_argument(
+        "--epsilon_sinkhorn_shared",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "--n_iters_sinkhorn_shared",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
+        "--divergence",
+        type=str,
+        default="cosine",
+    )
+    parser.add_argument(
+        "--temperature_sail",
+        type=float,
+        default=10,
+    )
+    parser.add_argument(
+        "--bias_sail",
+        type=float,
+        default=-3.0,
     )
 
     args = parser.parse_args(args)
