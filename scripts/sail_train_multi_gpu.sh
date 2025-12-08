@@ -7,7 +7,7 @@ bs=8192
 d=1024
 width_factor=8
 logit_scale=20
-logit_bias=-10 
+logit_bias=-10
 
 # text_embedding_list="data/tensor_data/text_embedding/NV-Embed-v2/yfcc15m_raw_caption data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc3m_raw_caption data/tensor_data/text_embedding/NV-Embed-v2/dreamclipcc12mhf_raw_caption" 
 # image_embedding_list="data/tensor_data/image_embedding/dinov2-base/yfcc15m data/tensor_data/image_embedding/dinov2-base/dreamclipcc3m data/tensor_data/image_embedding/dinov2-base/dreamclipcc12mhf"
@@ -27,7 +27,7 @@ output_name="sail_dinov2l_nv2_cc12m_mmap_raw_shortSV_multigpu_8k_per_gpu"
 
 # Corrected Bash Script Snippet:
 
-NUM_GPUS=2 # Or whatever you set it to
+NUM_GPUS=4 # Or whatever you set it to
 
 torchrun --nproc_per_node=$NUM_GPUS \
     --master_port=$((10000 + $RANDOM % 50000)) \

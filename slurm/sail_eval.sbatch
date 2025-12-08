@@ -7,7 +7,7 @@
 #SBATCH --constraint=h100_80gb
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
-#SBATCH --time=1:00:00
+#SBATCH --time=2:00:00
 #SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_eval_alignment.out
 #SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_eval_alignment.err
 
