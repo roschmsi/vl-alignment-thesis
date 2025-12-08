@@ -116,8 +116,8 @@ def encode_dataset(
                     pre_encode_text_features[index] = encoded_text_features[
                         i * 5 : (i + 1) * 5
                     ].cpu()
-            # save_features(pre_encode_image_features, save_backbone_image_features_path)
-            # save_features(pre_encode_text_features, save_backbone_text_features_path)
+            save_features(pre_encode_image_features, save_backbone_image_features_path)
+            save_features(pre_encode_text_features, save_backbone_text_features_path)
         else:
             pre_encode_image_features = load_features(save_backbone_image_features_path)
             pre_encode_text_features = load_features(save_backbone_text_features_path)

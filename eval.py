@@ -160,7 +160,6 @@ def parse_args():
 
 
 def main(args):
-
     epoch_num, training_info_str, model_prefix = extract_info_from_path(args)
     output_path = os.path.join(
         args.results_dir,
