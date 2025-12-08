@@ -3,6 +3,8 @@ import logging
 import math
 import os
 import time
+from itertools import cycle
+import gc
 
 import numpy as np
 import torch
@@ -59,6 +61,314 @@ def backward(total_loss, scaler):
         scaler.scale(total_loss).backward()
     else:
         total_loss.backward()
+
+
+@torch.no_grad()
+def _collect_all_batches(loader, device=None, non_blocking=True):
+    """
+    Concatenate ALL batches from a single-tensor loader into one big tensor.
+    Keeps on CPU by default to save VRAM; pass device to move.
+    """
+    text_chunks = []
+    image_chunks = []
+    for batch in loader:
+        # If the loader yields (data, labels) or dicts, adjust here.
+        # The user said these are single-modality loaders, so assume the batch IS the tensor.
+        text_chunks.append(batch[0].detach().cpu())
+        image_chunks.append(batch[1].detach().cpu())
+    all_texts = torch.cat(text_chunks, dim=0)
+    all_images = torch.cat(image_chunks, dim=0)
+    if device is not None:
+        all_texts = all_texts.to(device, non_blocking=non_blocking)
+        all_images = all_images.to(device, non_blocking=non_blocking)
+    return all_texts, all_images
+
+
+def train_one_epoch_ot_semisupervised(
+    model, data, loss, epoch, optimizer, scaler, scheduler, args
+):
+    device = torch.device(args.device)
+    autocast = get_autocast(args.precision)
+
+    model.train()
+
+    bimodal_loader = data["train"].bimodal_loader
+    text_loader = data["train"].text_loader
+    image_loader = data["train"].image_loader
+
+    num_batches_per_epoch = text_loader.num_batches
+    sample_digits = math.ceil(math.log(bimodal_loader.num_samples + 1, 10))
+
+    losses_m = {}
+    batch_time_m = AverageMeter()
+    data_time_m = AverageMeter()
+    end = time.time()
+
+    with torch.no_grad():
+        # TODO all this computation should actually happen before training starts
+        X_pairs, Y_pairs = _collect_all_batches(bimodal_loader)
+        X_pairs = X_pairs.to(device, non_blocking=True)
+        Y_pairs = Y_pairs.to(device, non_blocking=True)
+
+        Sxx, Syy, Sxy = loss.precompute_anchor_covariances(X_pairs, Y_pairs)
+        Sxx, Syy, Sxy = (
+            Sxx.to(device, non_blocking=True),
+            Syy.to(device, non_blocking=True),
+            Sxy.to(device, non_blocking=True),
+        )
+
+        if args.alpha_semisupervised_clusters > 0:
+            X_anchors, Y_anchors = loss.init_cluster_anchors(
+                X_pairs,
+                Y_pairs,
+                n_clusters=args.semisupervised_clusters,
+                min_cluster_size=args.min_cluster_size,
+                outlier_fraction=args.outlier_fraction,
+            )
+            loss.set_anchors(X_anchors.to(device), Y_anchors.to(device))
+
+        del X_pairs, Y_pairs
+
+    bimodal_iter = cycle(bimodal_loader)
+    image_iter = cycle(image_loader)
+
+    for i, texts_unpaired in enumerate(text_loader):
+        images_unpaired = next(image_iter)
+        paired_batch = next(bimodal_iter)
+        texts_paired, images_paired = paired_batch
+
+        texts_paired = texts_paired.to(device)
+        images_paired = images_paired.to(device)
+        texts_unpaired = texts_unpaired.to(device)
+        images_unpaired = images_unpaired.to(device)
+
+        i_accum = i // args.accum_freq
+        step = num_batches_per_epoch * epoch + i_accum
+
+        if not args.skip_scheduler:
+            scheduler(step)
+
+        # TODO deal with extra text pairs in the future
+
+        data_time_m.update(time.time() - end)
+        optimizer.zero_grad(set_to_none=True)
+
+        with autocast():
+            if i_accum % 5 == 0:  # Do this every few steps, or every step if desperate
+                gc.collect()  # Force Python to clean up abandoned objects
+                torch.cuda.empty_cache()
+
+            # TODO setup dataloader that can load paired and unpaired data
+            # TODO how should we handle extra text positives
+            model_out_paired = model(images_paired, texts_paired)
+            model_out_unpaired = model(images_unpaired, texts_unpaired)
+
+            total_loss, logs = loss(
+                X=texts_unpaired,
+                Y=images_unpaired,
+                X_pairs=texts_paired,
+                Y_pairs=images_paired,
+                fX=model_out_unpaired["text_features"],
+                fY=model_out_unpaired["image_features"],
+                fX_pairs=model_out_paired["text_features"],
+                fY_pairs=model_out_paired["image_features"],
+                Sxx=Sxx,
+                Syy=Syy,
+                Sxy=Sxy,
+            )
+
+        backward(total_loss, scaler)
+
+        if scaler is not None:
+            if args.grad_clip_norm is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            if args.grad_clip_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
+            optimizer.step()
+
+        batch_time_m.update(time.time() - end)
+        end = time.time()
+        batch_count = i_accum + 1
+
+        if is_master(args) and (
+            i_accum % args.log_every_n_steps == 0
+            or batch_count == num_batches_per_epoch
+        ):
+            batch_size = len(texts_unpaired)
+            num_samples = batch_count * batch_size * args.world_size
+            samples_per_epoch = text_loader.num_samples
+            percent_complete = 100.0 * batch_count / num_batches_per_epoch
+
+            # NOTE loss is coarsely sampled, just master node and per log update
+            for key, val in logs.items():
+                if key not in losses_m:
+                    losses_m[key] = AverageMeter()
+                losses_m[key].update(val, batch_size)
+
+            loss_log = " ".join(
+                [
+                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})"
+                    for loss_name, loss_m in losses_m.items()
+                ]
+            )
+            logging.info(
+                f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
+                f"LR: {optimizer.param_groups[0]['lr']:5f} " + loss_log
+            )
+
+            # Save train loss / etc. Using non avg meter values as loggers have their own smoothing
+            log_data = {
+                "data_time": data_time_m.val,
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+            log_data.update({name: val.val for name, val in losses_m.items()})
+
+            log_data = {"train/" + name: val for name, val in log_data.items()}
+
+            if args.wandb:
+                assert wandb is not None, "Please install wandb."
+                log_data["step"] = step  # for backwards compatibility
+                wandb.log(log_data, step=step)
+
+            # resetting batch / data time meters per log window
+            batch_time_m.reset()
+            data_time_m.reset()
+
+        del model_out_paired, model_out_unpaired, total_loss, logs
+
+
+def train_one_epoch_ot_supervised(
+    model, data, loss, epoch, optimizer, scaler, scheduler, args
+):
+    device = torch.device(args.device)
+    autocast = get_autocast(args.precision)
+
+    model.train()
+
+    bimodal_loader = data["train"].bimodal_loader
+
+    num_batches_per_epoch = bimodal_loader.num_batches
+    sample_digits = math.ceil(math.log(bimodal_loader.num_samples + 1, 10))
+
+    losses_m = {}
+    batch_time_m = AverageMeter()
+    data_time_m = AverageMeter()
+    end = time.time()
+
+    for i, paired_batch in enumerate(bimodal_loader):
+        texts_paired, images_paired = paired_batch
+
+        texts_paired = texts_paired.to(device)
+        images_paired = images_paired.to(device)
+
+        i_accum = i // args.accum_freq
+        step = num_batches_per_epoch * epoch + i_accum
+
+        if not args.skip_scheduler:
+            scheduler(step)
+
+        data_time_m.update(time.time() - end)
+        optimizer.zero_grad()
+
+        with autocast():
+            # TODO how should we handle extra text positives
+            model_out_paired = model(images_paired, texts_paired)
+
+            if args.alpha_supervised_implicit == 1.0:
+                _, log_plan_pairs = loss.match_in_latent(
+                    model_out_paired["text_features"],
+                    model_out_paired["image_features"],
+                )
+
+                total_loss = loss.loss_supervised_implicit(
+                    log_plan_pairs=log_plan_pairs
+                )
+                logs = {"loss_supervised_implicit": total_loss.item()}
+            elif args.alpha_supervised_sail == 1.0:
+                total_loss = loss.loss_supervised_sail(
+                    model_out_paired["text_features"],
+                    model_out_paired["image_features"],
+                )
+                logs = {"loss_supervised_implicit": total_loss.item()}
+            else:
+                raise NotImplementedError(
+                    "Only one of alpha_supervised_ot or alpha_supervised_sail should be 1.0"
+                )
+
+        backward(total_loss, scaler)
+
+        if scaler is not None:
+            if args.grad_clip_norm is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            if args.grad_clip_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), args.grad_clip_norm, norm_type=2.0
+                )
+            optimizer.step()
+
+        batch_time_m.update(time.time() - end)
+        end = time.time()
+        batch_count = i_accum + 1
+
+        if is_master(args) and (
+            i_accum % args.log_every_n_steps == 0
+            or batch_count == num_batches_per_epoch
+        ):
+            batch_size = len(texts_paired)
+            num_samples = batch_count * batch_size * args.world_size
+            samples_per_epoch = bimodal_loader.num_samples
+            percent_complete = 100.0 * batch_count / num_batches_per_epoch
+
+            # NOTE loss is coarsely sampled, just master node and per log update
+            for key, val in logs.items():
+                if key not in losses_m:
+                    losses_m[key] = AverageMeter()
+                losses_m[key].update(val, batch_size)
+
+            loss_log = " ".join(
+                [
+                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})"
+                    for loss_name, loss_m in losses_m.items()
+                ]
+            )
+            logging.info(
+                f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
+                f"LR: {optimizer.param_groups[0]['lr']:5f} " + loss_log
+            )
+
+            # Save train loss / etc. Using non avg meter values as loggers have their own smoothing
+            log_data = {
+                "data_time": data_time_m.val,
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+            log_data.update({name: val.val for name, val in losses_m.items()})
+
+            log_data = {"train/" + name: val for name, val in log_data.items()}
+
+            if args.wandb:
+                assert wandb is not None, "Please install wandb."
+                log_data["step"] = step  # for backwards compatibility
+                wandb.log(log_data, step=step)
+
+            # resetting batch / data time meters per log window
+            batch_time_m.reset()
+            data_time_m.reset()
+
+        del model_out_paired, total_loss, logs
 
 
 def train_one_epoch_ot(model, data, loss, epoch, optimizer, scaler, scheduler, args):

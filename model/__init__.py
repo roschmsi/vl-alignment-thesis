@@ -101,6 +101,9 @@ def create_loss(args):
             "alpha_supervised_explicit": args.alpha_supervised_explicit,
             "alpha_supervised_implicit": args.alpha_supervised_implicit,
             "alpha_semisupervised_ot": args.alpha_semisupervised_ot,
+            "alpha_semisupervised_ot_all": args.alpha_semisupervised_ot_all,
+            "alpha_semisupervised_clusters": args.alpha_semisupervised_clusters,
+            "alpha_semisupervised_sail": args.alpha_semisupervised_sail,
             "alpha_semisupervised_div": args.alpha_semisupervised_div,
             "alpha_unsupervised": args.alpha_unsupervised,
             # Sinkhorn params
@@ -111,6 +114,18 @@ def create_loss(args):
             # SAIL
             "temperature_sail": args.temperature_sail,
             "bias_sail": args.bias_sail,
+            # anchors advanced
+            "anchor_center": args.anchor_center,
+            "anchor_whiten": args.anchor_whiten,
+            "anchor_lam_x": args.anchor_lam_x,
+            "anchor_lam_y": args.anchor_lam_y,
+            "anchor_rank_k_x": args.anchor_rank_k_x,
+            "anchor_rank_k_y": args.anchor_rank_k_y,
+            "anchor_relrenorm": args.anchor_relrenorm,
+            # unbalanced OT
+            "unbalanced": args.unbalanced,
+            "tau_x": args.tau_x,
+            "tau_y": args.tau_y,
         }
         return FullMatchingModel(loss_config)
 

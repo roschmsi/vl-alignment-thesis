@@ -24,7 +24,13 @@ from train.logger import setup_logging, format_num_params
 from train.scheduler import cosine_lr, const_lr, const_lr_cooldown
 from train.distributed import is_master, init_distributed_device, broadcast_object
 from train.file_utils import pt_load, check_exists
-from train.train import train_one_epoch, evaluate, train_one_epoch_ot
+from train.train import (
+    train_one_epoch,
+    evaluate,
+    train_one_epoch_ot,
+    train_one_epoch_ot_semisupervised,
+    train_one_epoch_ot_supervised,
+)
 from train.optimizer import Lion
 
 from model import create_model, create_loss, create_loss
@@ -287,9 +293,14 @@ def main(args):
     # create scheduler if train
     scheduler = None
     if "train" in data and optimizer is not None:
-        total_steps = (
-            data["train"].dataloader.num_batches // args.accum_freq
-        ) * args.epochs
+        if args.semisupervised:
+            total_steps = data["train"].text_loader.num_batches * args.epochs
+        elif args.supervised:
+            total_steps = data["train"].bimodal_loader.num_batches * args.epochs
+        else:
+            total_steps = (
+                data["train"].dataloader.num_batches // args.accum_freq
+            ) * args.epochs
         args.warmup = math.ceil(0.1 * total_steps)
         if args.lr_scheduler == "cosine":
             scheduler = cosine_lr(optimizer, args.lr, args.warmup, total_steps)
@@ -323,9 +334,9 @@ def main(args):
     if args.wandb and is_master(args):
         assert wandb is not None, "Please install wandb."
         logging.debug("Starting wandb.")
-        args.train_sz = data["train"].dataloader.num_samples
-        if args.val_data is not None:
-            args.val_sz = data["val"].dataloader.num_samples
+        # args.train_sz = data["train"].dataloader.num_samples
+        # if args.val_data is not None:
+        #     args.val_sz = data["val"].dataloader.num_samples
         # you will have to configure this for your project!
         wandb.init(
             project=args.wandb_project_name,
@@ -356,9 +367,18 @@ def main(args):
             logging.info(f"Start epoch {epoch}")
 
         if args.ot:
-            train_one_epoch_ot(
-                model, data, loss, epoch, optimizer, scaler, scheduler, args
-            )
+            if args.semisupervised:
+                train_one_epoch_ot_semisupervised(
+                    model, data, loss, epoch, optimizer, scaler, scheduler, args
+                )
+            elif args.supervised:
+                train_one_epoch_ot_supervised(
+                    model, data, loss, epoch, optimizer, scaler, scheduler, args
+                )
+            else:
+                train_one_epoch_ot(
+                    model, data, loss, epoch, optimizer, scaler, scheduler, args
+                )
         else:
             train_one_epoch(
                 model, data, loss, epoch, optimizer, scaler, scheduler, args

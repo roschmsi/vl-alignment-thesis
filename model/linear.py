@@ -3,13 +3,14 @@ from torch import nn
 from typing import Optional, Callable
 import torch.nn.functional as F
 
-# v7  
+
+# v7
 class StarMLP(nn.Module):
     def __init__(
         self,
         input_dim: int,
         output_dim: int,
-        width_factor: int ,
+        width_factor: int,
         intermediate_dim: Optional[int] = None,
         activation: Optional[Callable] = None,
     ):
@@ -38,32 +39,26 @@ class StarMLP(nn.Module):
 class ShareLockMLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout_prob=0.2):
         super(ShareLockMLP, self).__init__()
-        
+
         # Define the layers
         self.layers = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout_prob),
-
             nn.Linear(hidden_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout_prob),
-
             nn.Linear(hidden_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout_prob),
-
-            nn.Linear(hidden_dim, output_dim)
+            nn.Linear(hidden_dim, output_dim),
         )
 
     def forward(self, x):
         return self.layers(x)
-
-
-
 
 
 # v2
@@ -76,6 +71,7 @@ class SwiGLU(nn.Module):
     def forward(self, x):
         return self.linear1(x) * F.silu(self.linear2(x))
 
+
 class SiglipMLP(nn.Module):
     def __init__(
         self,
@@ -84,7 +80,9 @@ class SiglipMLP(nn.Module):
         intermediate_dim: Optional[int] = None,
     ):
         super().__init__()
-        intermediate_dim = intermediate_dim if intermediate_dim is not None else 4*input_dim
+        intermediate_dim = (
+            intermediate_dim if intermediate_dim is not None else 4 * input_dim
+        )
         self.proj = nn.Sequential(
             nn.Linear(input_dim, intermediate_dim),
             nn.GELU(),
@@ -92,7 +90,8 @@ class SiglipMLP(nn.Module):
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        return  self.proj(hidden_states)
+        return self.proj(hidden_states)
+
 
 # v6 fast weight programming
 # class StarMLP(nn.Module):

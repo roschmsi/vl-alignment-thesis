@@ -114,6 +114,66 @@ def sinkhorn(M, epsilon, a=None, b=None, max_iter=10000, tol=1e-5, symmetric=Tru
     return {"plan": T, "log_plan": log_T, "n_iters": n_iters}
 
 
+def sinkhorn_unbalanced(M, epsilon, reg_m, a=None, b=None, max_iter=10000, tol=1e-5):
+    """
+    Solves Unbalanced Optimal Transport using the Generalized Sinkhorn algorithm.
+
+    Args:
+        M: Cost matrix (n x m)
+        epsilon: Entropic regularization weight
+        reg_m: Marginal relaxation term (rho).
+               Higher = closer to balanced OT.
+               Lower = more mass creation/destruction allowed.
+        a: Source distribution (weight vector)
+        b: Target distribution (weight vector)
+    """
+
+    # K is essentially log_K in this formulation
+    K = -M / epsilon
+    n, m = K.shape
+
+    if a is None:
+        a = torch.ones(n, device=K.device) / n
+    if b is None:
+        b = torch.ones(m, device=K.device) / m
+
+    # Calculate the damping factor (tau)
+    # If reg_m -> infinity, tau -> 1 (Standard Balanced Sinkhorn)
+    # If reg_m -> 0, tau -> 0 (No transport, only mass destruction)
+    tau = reg_m / (reg_m + epsilon)
+
+    u = torch.zeros(n, dtype=K.dtype, device=K.device)
+    v = torch.zeros(m, dtype=K.dtype, device=K.device)
+
+    for n_iters in range(max_iter):
+        u_prev = u.clone()
+        v_prev = v.clone()
+
+        # 1. Update u (Source Potential) with damping
+        # Balanced: u = log(a) - logsumexp(...)
+        # Unbalanced: u = tau * (log(a) - logsumexp(...))
+        u = tau * (torch.log(a) - torch.logsumexp(K + v[None, :], dim=1).squeeze())
+
+        # 2. Update v (Target Potential) with damping
+        v = tau * (torch.log(b) - torch.logsumexp(K + u[:, None], dim=0).squeeze())
+
+        # Check convergence
+        # Note: We cannot check marginal error |P1 - a| because they are NOT supposed to be equal.
+        # Instead, we check the stability of the dual potentials u and v.
+        if n_iters % 10 == 0:
+            err_u = torch.max(torch.abs(u - u_prev))
+            err_v = torch.max(torch.abs(v - v_prev))
+
+            if max(err_u, err_v) < tol:
+                break
+
+    # Compute final plan
+    log_T = K + u[:, None] + v[None, :]
+    T = torch.exp(log_T)
+
+    return {"plan": T, "log_plan": log_T, "n_iters": n_iters}
+
+
 def top_k_accuracy(C, k):
     """
     Assume a batch with c pairs (fully supervised)

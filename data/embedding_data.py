@@ -8,9 +8,14 @@ from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 import h5py
 from bisect import bisect_right
+import bisect
 import torch.distributed as dist
 from typing import List, Optional, Tuple, Iterator
 import random
+import numpy as np
+import torch
+from torch.utils.data import IterableDataset
+import torch.distributed as dist
 
 
 def custom_collate_fn(batch):
@@ -414,18 +419,9 @@ class H5EmbeddingDataset(Dataset):
         self._ensure_open("img", j_img)
         img = np.ascontiguousarray(self._img_dsets[j_img][i_img])
 
-        # print("text shape:", txt.shape)
-        # print("image shape:", img.shape)
-
         if self.hidden_states:
             img = extract_hidden_states(img, self.hidden_states_img_idx)
             txt = extract_hidden_states(txt, self.hidden_states_text_idx)
-        # else:
-        #     # Keep your original last-token logic
-        #     # currently only the last representation is saved during encoding
-
-        #     img = img[:, -1]
-        #     txt = txt[:, -1]
 
         if self.extra_text_paths:
             j_xt, i_xt = self._locate(self._xt_cumlens, idx)
@@ -841,6 +837,71 @@ class H5EmbeddingIterableDataset(IterableDataset):
         # number of *samples* produced per full pass of __iter__
         return self.num_samples
 
+    def read_by_global_index(self, gidx: int):
+        """
+        Fetch a single aligned (text, image[, extra_text]) sample by global index.
+        Returns torch tensors ready to use.
+        Safe to call from worker threads (uses per-worker handles).
+        """
+        assert 0 <= gidx < self.num_samples, f"gidx out of range: {gidx}"
+
+        # Locate & open text
+        tj, tloc = self._locate(self._txt_cumlens, gidx)
+        self._ensure_open("txt", tj)
+        txt_np = self._txt_dsets[tj][tloc]
+
+        # Locate & open image
+        ij, iloc = self._locate(self._img_cumlens, gidx)
+        self._ensure_open("img", ij)
+        img_np = self._img_dsets[ij][iloc]
+
+        # Optional extra text
+        xt_np = None
+        if self._xt_cumlens is not None:
+            xj, xloc = self._locate(self._xt_cumlens, gidx)
+            self._ensure_open("xt", xj)
+            xt_np = self._xt_dsets[xj][xloc]
+
+        # Hidden-states handling (same logic you use in streaming path)
+        if self.hidden_states:
+            img_np = extract_hidden_states(
+                img_np,
+                (
+                    self.hidden_states_img_idx
+                    if self.hidden_states_img_idx is not None
+                    else None
+                ),
+            )
+            txt_np = extract_hidden_states(
+                txt_np,
+                (
+                    self.hidden_states_text_idx
+                    if self.hidden_states_text_idx is not None
+                    else None
+                ),
+            )
+            if xt_np is not None:
+                xt_np = extract_hidden_states(
+                    xt_np,
+                    (
+                        self.hidden_states_text_idx
+                        if self.hidden_states_text_idx is not None
+                        else None
+                    ),
+                )
+        else:
+            # keep last-layer or full vector per your current convention (no-op here)
+            pass
+
+        # Convert to contiguous tensors
+        t = torch.from_numpy(np.ascontiguousarray(txt_np))
+        v = torch.from_numpy(np.ascontiguousarray(img_np))
+        if xt_np is not None:
+            x = torch.from_numpy(np.ascontiguousarray(xt_np))
+            return (t, v, x)
+        else:
+            return (t, v)
+
 
 def batched_collate_fn(batch):
     """
@@ -960,32 +1021,243 @@ class BatchedLazyDataset(Dataset):
         return visual_dim, text_dim
 
 
-if __name__ == "__main__":
+def build_pairing_plan(num_samples: int, k_supervised: int, seed: int = 0):
+    assert 0 < k_supervised <= num_samples
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(num_samples)
 
-    text_embedding_dir = [
-        "/home/mila/l/le.zhang/scratch/light_align/data/tensor_data/text_embedding/gte-large-en-v1.5/validation"
-    ]
-    image_embedding_dir = [
-        "/home/mila/l/le.zhang/scratch/light_align/data/tensor_data/image_embedding/dinov2-large/validation"
-    ]
-    print("Loading dataset...")
-    # dataset = LazyVLEmbeddingDataset(text_embedding_dir, image_embedding_dir)
-    dataset = VLEmbeddingDataset(text_embedding_dir, image_embedding_dir)
-    print("Dataset loaded.")
-    # 创建DataLoader
-    breakpoint()
-    dataloader = DataLoader(
-        dataset,
-        batch_size=128,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        collate_fn=custom_collate_fn,
-    )
-    for batch in tqdm(dataloader):
-        if len(batch) == 3:
-            text_vectors, image_vectors, extra_text_vectors = batch
+    paired_idx = np.sort(perm[:k_supervised])  # keep aligned
+    rest = perm[k_supervised:]
+
+    # independent shuffles for unsupervised split
+    unsup_t = rest.copy()
+    rng.shuffle(unsup_t)
+    unsup_v = rest.copy()
+    rng.shuffle(unsup_v)
+
+    if len(unsup_v) > 1:  # reduce accidental matches
+        unsup_v = np.roll(unsup_v, 1)
+
+    return paired_idx, unsup_t, unsup_v
+
+
+class _Shard:
+    @staticmethod
+    def info():
+        if dist.is_available() and dist.is_initialized():
+            rank, world = dist.get_rank(), dist.get_world_size()
         else:
-            text_vectors, image_vectors = batch
-            extra_text_vectors = None
-        print(text_vectors.shape, image_vectors.shape)
+            rank, world = 0, 1
+        wi = torch.utils.data.get_worker_info()
+        wid = wi.id if wi else 0
+        nworkers = wi.num_workers if wi else 1
+        return rank * nworkers + wid, world * nworkers
+
+    @staticmethod
+    def take(indices: np.ndarray):
+        sid, nshards = _Shard.info()
+        return indices if nshards <= 1 else indices[sid::nshards]
+
+
+class PairedSubsetDataset(IterableDataset):
+    def __init__(self, base, paired_idx):
+        super().__init__()
+        self.base = base
+        self.idx = np.asarray(paired_idx, dtype=np.int64)
+
+    def __len__(self):
+        # Report GLOBAL length; do NOT shard here
+        return int(self.idx.size)
+
+    def __iter__(self):
+        # If you want no worker sharding on single-GPU, just iterate self.idx
+        local_idx = self.idx
+        # If you DO want worker sharding, do it explicitly here using get_worker_info()
+        # and/or torch.distributed, but keep __len__ global.
+
+        try:
+            for g in local_idx:
+                yield self.base.read_by_global_index(int(g))
+        finally:
+            self.base.close()
+
+
+class UnpairedSubsetDataset(IterableDataset):
+    """Streams de-aligned pairs by independently choosing text and image indices."""
+
+    def __init__(
+        self,
+        base: H5EmbeddingIterableDataset,
+        text_idx: np.ndarray,
+        image_idx: np.ndarray,
+        reshuffle_each_epoch: bool = True,
+        seed: int = 0,
+    ):
+        super().__init__()
+        assert len(text_idx) == len(image_idx)
+        self.base = base
+        self.t = np.asarray(text_idx, dtype=np.int64)
+        self.v = np.asarray(image_idx, dtype=np.int64)
+        self.reshuffle = reshuffle_each_epoch
+        self.seed = int(seed)
+        self._epoch = 0
+
+    def set_epoch(self, e: int):
+        self._epoch = int(e)
+
+    def __iter__(self):
+        t = _Shard.take(self.t).copy()
+        v = _Shard.take(self.v).copy()
+
+        if self.reshuffle:
+            rng = np.random.default_rng(self.seed + self._epoch)
+            rng.shuffle(t)
+            rng.shuffle(v)
+            if len(v) > 1:
+                v = np.roll(v, 1)
+
+        try:
+            for ti, vi in zip(t, v):
+                s_t = self.base.read_by_global_index(int(ti))
+                s_v = self.base.read_by_global_index(int(vi))
+                if len(s_t) == 2:
+                    t_tensor, _ = s_t
+                    _, v_tensor = s_v
+                    yield (t_tensor, v_tensor)
+                else:
+                    t_tensor, _, x_tensor = s_t
+                    _, v_tensor, _ = s_v
+                    yield (t_tensor, v_tensor, x_tensor)  # keep x aligned to TEXT
+        finally:
+            self.base.close()
+
+    def __len__(self):
+        return int(self.t.size)
+
+
+class _InMemoryFilteredH5Base(Dataset):
+    def __init__(self, paths, h5_key, indices):
+        super().__init__()
+        self.indices = np.array(indices)
+
+        total_file_length = 0
+        file_boundaries = []  # Stores (path, start_idx, end_idx)
+        feature_dim = None
+        dtype = None
+
+        # --- Step 1: Scan files to map boundaries and get dimensions ---
+        print(f"Scanning {len(paths)} files for metadata...")
+        for path in paths:
+            try:
+                with h5py.File(path, "r") as f:
+                    dset = f[h5_key]
+                    length = len(dset)
+
+                    # Capture dimension and dtype from the first valid file
+                    if feature_dim is None:
+                        shape = dset.shape
+                        feature_dim = shape[1] if len(shape) > 1 else 1
+                        # We usually want Float32 for training, even if disk is Float16
+                        dtype = torch.float32
+
+                    start = total_file_length
+                    end = total_file_length + length
+                    file_boundaries.append((path, start, end))
+                    total_file_length += length
+            except Exception as e:
+                print(f"Error scanning {path}: {e}")
+
+        # --- Step 2: Pre-allocate the exact memory needed ---
+        # We create the final container now.
+        # len(self.indices) ensures we only store what we need.
+        print(
+            f"Allocating memory for {len(self.indices)} samples (dim={feature_dim})..."
+        )
+        self.data = torch.zeros((len(self.indices), feature_dim), dtype=dtype)
+
+        # --- Step 3: Load specific slices from files (range-based, fewer I/Os) ---
+        print(f"Loading filtered data from {len(paths)} files (range-based reads)...")
+
+        indices = self.indices  # just a shorthand
+
+        for path, file_start, file_end in file_boundaries:
+            # Which requested global indices fall into this file?
+            mask = (indices >= file_start) & (indices < file_end)
+            if not np.any(mask):
+                continue
+
+            # Global indices we need from this file
+            file_global = indices[mask]  # shape: (K,)
+            dest_slots = np.where(mask)[0]  # where to place them in self.data
+            file_local = file_global - file_start  # convert to per-file indices
+
+            # Sort by local index so we can read contiguous ranges
+            order = np.argsort(file_local)
+            file_local_sorted = file_local[order]
+            dest_sorted = dest_slots[order]
+
+            diffs = np.diff(file_local_sorted)
+            run_starts = np.concatenate(([0], np.where(diffs != 1)[0] + 1))
+            run_ends = np.concatenate((run_starts[1:], [len(file_local_sorted)]))
+
+            with h5py.File(path, "r") as f:
+                dset = f[h5_key]
+
+                for rs, re in zip(run_starts, run_ends):
+                    # Local indices for this run
+                    run_local = file_local_sorted[rs:re]
+                    run_dest = dest_sorted[rs:re]
+
+                    start_idx = int(run_local[0])
+                    end_idx = int(run_local[-1]) + 1  # slice end is exclusive
+
+                    # ONE contiguous read from disk
+                    chunk_np = dset[
+                        start_idx:end_idx
+                    ]  # shape: (end_idx-start_idx, feature_dim)
+
+                    # If dtype already matches, avoid unnecessary conversion
+                    if dtype == torch.float32 and np.issubdtype(
+                        chunk_np.dtype, np.floating
+                    ):
+                        chunk_torch = torch.from_numpy(chunk_np).to(dtype=dtype)
+                    else:
+                        # Fallback (may incur a copy)
+                        chunk_torch = torch.as_tensor(chunk_np, dtype=dtype)
+
+                    # run_local is consecutive, so chunk_np is already in correct order
+                    # The run_dest is in the same order as run_local, so we can assign directly
+                    self.data[run_dest] = chunk_torch
+
+        print(f"Successfully loaded {len(self.data)} filtered samples.")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+
+class H5BimodalDataset(Dataset):
+    def __init__(self, text_paths, image_paths, indices, h5_key="embeddings"):
+        self.indices = indices
+        self.text_db = _InMemoryFilteredH5Base(
+            paths=text_paths, h5_key=h5_key, indices=indices
+        )
+        self.image_db = _InMemoryFilteredH5Base(
+            paths=image_paths, h5_key=h5_key, indices=indices
+        )
+
+    def __len__(self):
+        return len(self.text_db)
+
+    def __getitem__(self, idx):
+        return self.text_db[idx], self.image_db[idx]
+
+
+class H5UnimodalDataset(_InMemoryFilteredH5Base):
+    def __init__(self, paths, indices, h5_key="embeddings"):
+        super().__init__(paths=paths, h5_key=h5_key, indices=indices)
+
+    def __getitem__(self, idx):
+        return self.data[idx]

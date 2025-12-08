@@ -237,6 +237,11 @@ def parse_args(args):
         "--batch-size", type=int, default=64, help="Batch size per GPU."
     )
     parser.add_argument(
+        "--batch-size-supervised",
+        type=int,
+        help="Number of image-text pairs per batch in semi-supervised setting.",
+    )
+    parser.add_argument(
         "--epochs", type=int, default=32, help="Number of epochs to train for."
     )
     parser.add_argument(
@@ -677,6 +682,11 @@ def parse_args(args):
         default=0.0,
     )
     parser.add_argument(
+        "--alpha_semisupervised_sail",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--alpha_supervised_explicit",
         default=0,
         type=float,
@@ -690,6 +700,31 @@ def parse_args(args):
     )
     parser.add_argument(
         "--alpha_semisupervised_ot",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--alpha_semisupervised_clusters",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--semisupervised_clusters",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--outlier_fraction",
+        type=float,
+        help="Fraction of outliers to remove when initializing cluster anchors.",
+    )
+    parser.add_argument(
+        "--min_cluster_size",
+        type=int,
+        help="Minimum cluster size to keep when initializing cluster anchors.",
+    )
+    parser.add_argument(
+        "--alpha_semisupervised_ot_all",
         type=float,
         default=0.0,
     )
@@ -724,7 +759,7 @@ def parse_args(args):
     parser.add_argument(
         "--n_iters_sinkhorn_shared",
         type=int,
-        default=10,
+        default=20,
     )
     parser.add_argument(
         "--divergence",
@@ -734,12 +769,90 @@ def parse_args(args):
     parser.add_argument(
         "--temperature_sail",
         type=float,
-        default=10,
+        default=20.0,
     )
     parser.add_argument(
         "--bias_sail",
         type=float,
-        default=-3.0,
+        default=-10.0,
+    )
+    parser.add_argument(
+        "--semisupervised",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--supervised",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--n_supervised_pairs",
+        type=int,
+        default=None,
+    )
+    # anchor advanced options
+    parser.add_argument(
+        "--anchor_center",
+        default=False,
+        action="store_true",
+        help="Center anchors when computing OT plan.",
+    )
+    parser.add_argument(
+        "--anchor_whiten",
+        default=False,
+        action="store_true",
+        help="Whiten anchors when computing OT plan.",
+    )
+    parser.add_argument(
+        "--anchor_lam_x",
+        type=float,
+        help="Regularization parameter for anchor covariance in x.",
+    )
+    parser.add_argument(
+        "--anchor_lam_y",
+        type=float,
+        help="Regularization parameter for anchor covariance in y.",
+    )
+    parser.add_argument(
+        "--anchor_rank_k_x",
+        type=int,
+        help="Use rank-k approximation for anchor covariance in x.",
+    )
+    parser.add_argument(
+        "--anchor_rank_k_y",
+        type=int,
+        help="Use rank-k approximation for anchor covariance in y.",
+    )
+    parser.add_argument(
+        "--anchor_relrenorm",
+        default=False,
+        action="store_true",
+        help="Use relative renormalization for anchor OT plan.",
+    )
+    parser.add_argument(
+        "--unbalanced",
+        default=False,
+        action="store_true",
+        help="Use unbalanced optimal transport.",
+    )
+    parser.add_argument(
+        "--tau_x",
+        type=float,
+        default=1.0,
+        help="Unbalanced OT tau_x parameter.",
+    )
+    parser.add_argument(
+        "--tau_y",
+        type=float,
+        default=1.0,
+        help="Unbalanced OT tau_y parameter.",
+    )
+    parser.add_argument(
+        "--debugging",
+        default=False,
+        action="store_true",
+        help="If true, use debugging mode with smaller datasets.",
     )
 
     args = parser.parse_args(args)
