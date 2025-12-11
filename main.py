@@ -19,12 +19,14 @@ try:
 except ImportError:
     wandb = None
 
+from optimal_transport.matching import IncrementalCovariance
 from train.params import parse_args
 from train.logger import setup_logging, format_num_params
 from train.scheduler import cosine_lr, const_lr, const_lr_cooldown
 from train.distributed import is_master, init_distributed_device, broadcast_object
 from train.file_utils import pt_load, check_exists
 from train.train import (
+    _collect_all_batches,
     train_one_epoch,
     evaluate,
     train_one_epoch_ot,
@@ -352,15 +354,56 @@ def main(args):
         wandb.save(params_file)
         logging.debug("Finished loading wandb.")
 
-    # Pytorch 2.0 adds '_orig_mod.' prefix to keys of state_dict() of compiled models.
-    # For compatibility, we save state_dict() of the original model, which shares the
-    # weights without the prefix.
     original_model = model
     if args.torchcompile:
         logging.info("Compiling model...")
         model = torch.compile(original_model)
 
     loss = create_loss(args)
+
+    if args.alpha_semisupervised_ot > 0 or args.alpha_semisupervised_clusters > 0:
+        with torch.no_grad():
+            bimodal_loader = data["train"].bimodal_loader
+            text_loader = data["train"].text_loader
+            image_loader = data["train"].image_loader
+
+            X_pairs, Y_pairs = _collect_all_batches(bimodal_loader)
+            X_pairs = X_pairs.to(device, non_blocking=True)
+            Y_pairs = Y_pairs.to(device, non_blocking=True)
+
+            cov_tracker_X = IncrementalCovariance(device, hidden_dim=X_pairs.shape[1])
+            cov_tracker_Y = IncrementalCovariance(device, hidden_dim=Y_pairs.shape[1])
+
+            # add paired data
+            cov_tracker_X.update(X_pairs)
+            cov_tracker_Y.update(Y_pairs)
+
+            # add unpaired data
+            for batch_x, batch_y in zip(text_loader, image_loader):
+                cov_tracker_X.update(batch_x)
+                cov_tracker_Y.update(batch_y)
+
+            # compute mean and covariance
+            Sxx_total, mean_x_total = cov_tracker_X.compute()
+            Syy_total, mean_y_total = cov_tracker_Y.compute()
+
+            loss.precompute_anchor_covariances(
+                X_pairs=X_pairs,
+                Y_pairs=Y_pairs,
+                Sxx_total=Sxx_total,
+                Syy_total=Syy_total,
+                mean_x_total=mean_x_total,
+                mean_y_total=mean_y_total,
+            )
+
+            if args.alpha_semisupervised_clusters > 0:
+                loss.init_cluster_anchors(
+                    X_pairs,
+                    Y_pairs,
+                    n_clusters=args.semisupervised_clusters,
+                    min_cluster_size=args.min_cluster_size,
+                    outlier_fraction=args.outlier_fraction,
+                )
 
     for epoch in range(start_epoch, args.epochs):
         if is_master(args):

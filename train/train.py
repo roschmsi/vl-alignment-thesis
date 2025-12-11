@@ -104,31 +104,6 @@ def train_one_epoch_ot_semisupervised(
     data_time_m = AverageMeter()
     end = time.time()
 
-    with torch.no_grad():
-        # TODO all this computation should actually happen before training starts
-        X_pairs, Y_pairs = _collect_all_batches(bimodal_loader)
-        X_pairs = X_pairs.to(device, non_blocking=True)
-        Y_pairs = Y_pairs.to(device, non_blocking=True)
-
-        Sxx, Syy, Sxy = loss.precompute_anchor_covariances(X_pairs, Y_pairs)
-        Sxx, Syy, Sxy = (
-            Sxx.to(device, non_blocking=True),
-            Syy.to(device, non_blocking=True),
-            Sxy.to(device, non_blocking=True),
-        )
-
-        if args.alpha_semisupervised_clusters > 0:
-            X_anchors, Y_anchors = loss.init_cluster_anchors(
-                X_pairs,
-                Y_pairs,
-                n_clusters=args.semisupervised_clusters,
-                min_cluster_size=args.min_cluster_size,
-                outlier_fraction=args.outlier_fraction,
-            )
-            loss.set_anchors(X_anchors.to(device), Y_anchors.to(device))
-
-        del X_pairs, Y_pairs
-
     bimodal_iter = cycle(bimodal_loader)
     image_iter = cycle(image_loader)
 
@@ -148,18 +123,15 @@ def train_one_epoch_ot_semisupervised(
         if not args.skip_scheduler:
             scheduler(step)
 
-        # TODO deal with extra text pairs in the future
-
         data_time_m.update(time.time() - end)
         optimizer.zero_grad(set_to_none=True)
 
         with autocast():
-            if i_accum % 5 == 0:  # Do this every few steps, or every step if desperate
-                gc.collect()  # Force Python to clean up abandoned objects
-                torch.cuda.empty_cache()
+            # if i_accum % 5 == 0:
+            #     gc.collect()
+            #     torch.cuda.empty_cache()
 
-            # TODO setup dataloader that can load paired and unpaired data
-            # TODO how should we handle extra text positives
+            # TODO deal with extra text pairs in the future
             model_out_paired = model(images_paired, texts_paired)
             model_out_unpaired = model(images_unpaired, texts_unpaired)
 
@@ -172,9 +144,6 @@ def train_one_epoch_ot_semisupervised(
                 fY=model_out_unpaired["image_features"],
                 fX_pairs=model_out_paired["text_features"],
                 fY_pairs=model_out_paired["image_features"],
-                Sxx=Sxx,
-                Syy=Syy,
-                Sxy=Sxy,
             )
 
         backward(total_loss, scaler)

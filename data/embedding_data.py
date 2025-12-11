@@ -1135,17 +1135,16 @@ class UnpairedSubsetDataset(IterableDataset):
         return int(self.t.size)
 
 
-class _InMemoryFilteredH5Base(Dataset):
+class H5Base(Dataset):
     def __init__(self, paths, h5_key, indices):
         super().__init__()
         self.indices = np.array(indices)
 
         total_file_length = 0
-        file_boundaries = []  # Stores (path, start_idx, end_idx)
+        file_boundaries = []
         feature_dim = None
         dtype = None
 
-        # --- Step 1: Scan files to map boundaries and get dimensions ---
         print(f"Scanning {len(paths)} files for metadata...")
         for path in paths:
             try:
@@ -1153,7 +1152,6 @@ class _InMemoryFilteredH5Base(Dataset):
                     dset = f[h5_key]
                     length = len(dset)
 
-                    # Capture dimension and dtype from the first valid file
                     if feature_dim is None:
                         shape = dset.shape
                         feature_dim = shape[1] if len(shape) > 1 else 1
@@ -1241,12 +1239,8 @@ class _InMemoryFilteredH5Base(Dataset):
 class H5BimodalDataset(Dataset):
     def __init__(self, text_paths, image_paths, indices, h5_key="embeddings"):
         self.indices = indices
-        self.text_db = _InMemoryFilteredH5Base(
-            paths=text_paths, h5_key=h5_key, indices=indices
-        )
-        self.image_db = _InMemoryFilteredH5Base(
-            paths=image_paths, h5_key=h5_key, indices=indices
-        )
+        self.text_db = H5Base(paths=text_paths, h5_key=h5_key, indices=indices)
+        self.image_db = H5Base(paths=image_paths, h5_key=h5_key, indices=indices)
 
     def __len__(self):
         return len(self.text_db)
@@ -1255,7 +1249,7 @@ class H5BimodalDataset(Dataset):
         return self.text_db[idx], self.image_db[idx]
 
 
-class H5UnimodalDataset(_InMemoryFilteredH5Base):
+class H5UnimodalDataset(H5Base):
     def __init__(self, paths, indices, h5_key="embeddings"):
         super().__init__(paths=paths, h5_key=h5_key, indices=indices)
 
