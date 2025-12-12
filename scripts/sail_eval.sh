@@ -3,7 +3,7 @@
 vision_model="facebook/dinov2-large"
 text_model="nvidia/NV-Embed-v2"
 
-CKPT_DIR="/lustre/groups/eml/projects/sroschmann/ot_logs/dinov2_nv2_cc3m_raw_10000_semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_check_after_refactoring/checkpoints"
+CKPT_DIR="/lustre/groups/eml/projects/sroschmann/ot_logs/dinov2_nv2_cc3m_raw_10000_semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_full_fixrn/checkpoints"
 DATASET_ROOT_DIR="/lustre/groups/eml/projects/sroschmann/data"
 
 shopt -s nullglob

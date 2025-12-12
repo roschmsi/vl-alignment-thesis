@@ -344,17 +344,20 @@ class FullMatchingModel(nn.Module):
                 self.epsilon_sinkhorn_anchor,
                 self.n_iters_sinkhorn_anchor,
             )
-
-            if self.anchor_whiten and self.anchor_center:
+            if self.anchor_center:
                 Xc = X - self.x_mean
                 Yc = Y - self.y_mean
+            else:
+                Xc = X
+                Yc = Y
 
+            if self.anchor_relrenorm:
+                Xc = Xc / Xc.norm(dim=1, keepdim=True).clamp(min=eps)
+                Yc = Yc / Yc.norm(dim=1, keepdim=True).clamp(min=eps)
+
+            if self.anchor_whiten:
                 Xw = Xc @ self.Wxx
                 Yw = Yc @ self.Wyy
-
-                if self.anchor_relrenorm:
-                    Xc = Xc / Xc.norm(dim=1, keepdim=True).clamp(min=eps)
-                    Yc = Yc / Yc.norm(dim=1, keepdim=True).clamp(min=eps)
 
                 sim = Xw @ self.Sxy_w @ Yw.T
                 dist = -sim

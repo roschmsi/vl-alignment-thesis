@@ -1,15 +1,7 @@
 from .embedding_data import (
     H5BimodalDataset,
-    H5EmbeddingIterableDataset,
     H5UnimodalDataset,
-    PairedSubsetDataset,
-    UnpairedSubsetDataset,
-    VLEmbeddingDataset,
-    MMAPDataset,
-    build_pairing_plan,
-    custom_collate_fn,
 )
-from torch.utils.data.distributed import DistributedSampler
 from dataclasses import dataclass
 from multiprocessing import Value
 from torch.utils.data import DataLoader
@@ -51,15 +43,6 @@ def get_embedding_dataset(
     extra_text_embedding_list,
     workers,
     batch_size,
-    train_num_samples=None,
-    is_train=True,
-    distributed=False,
-    hidden_states=False,
-    hidden_states_img_idx=None,
-    hidden_states_text_idx=None,
-    metadata_path=None,
-    mmap=False,
-    hdf5=False,
     semisupervised=False,
     supervised=False,
     n_supervised_pairs=None,
@@ -205,15 +188,6 @@ def get_data(args, epoch=0):
             args.extra_text_embedding_list,
             workers=args.workers,
             batch_size=args.batch_size,
-            train_num_samples=args.train_num_samples,
-            is_train=True,
-            distributed=args.distributed,
-            hidden_states=args.hidden_states,
-            hidden_states_img_idx=args.hidden_states_img_idx,
-            hidden_states_text_idx=args.hidden_states_text_idx,
-            metadata_path=args.metadata_path,
-            mmap=args.mmap,
-            hdf5=args.hdf5,
             semisupervised=args.semisupervised,
             supervised=args.supervised,
             n_supervised_pairs=args.n_supervised_pairs,
@@ -230,15 +204,6 @@ def get_data(args, epoch=0):
             extra_text_embedding_list=None,
             workers=args.workers,
             batch_size=args.batch_size,
-            train_num_samples=None,
-            is_train=False,
-            distributed=args.distributed,
-            hidden_states=args.hidden_states,
-            hidden_states_img_idx=args.hidden_states_img_idx,
-            hidden_states_text_idx=args.hidden_states_text_idx,
-            metadata_path=args.metadata_path,
-            mmap=args.mmap,
-            hdf5=args.hdf5,
         )
 
     return data
