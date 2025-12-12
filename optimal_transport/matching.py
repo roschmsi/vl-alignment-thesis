@@ -356,10 +356,9 @@ class FullMatchingModel(nn.Module):
                 Yc = Yc / Yc.norm(dim=1, keepdim=True).clamp(min=eps)
 
             if self.anchor_whiten:
-                Xw = Xc @ self.Wxx
-                Yw = Yc @ self.Wyy
-
-                sim = Xw @ self.Sxy_w @ Yw.T
+                # Xw = Xc @ self.Wxx
+                # Yw = Yc @ self.Wyy
+                sim = Xc @ self.Sxy_w @ Yc.T
                 dist = -sim
 
             else:
