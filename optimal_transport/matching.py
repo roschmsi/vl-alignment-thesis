@@ -1,16 +1,15 @@
-# Define model
 import torch.nn as nn
 import torch
 from optimal_transport.ot_simplified import (
     basic_marginal_loss,
     sinkhorn,
     optimized_quad_loss,
-    sinkhorn_unbalanced,
 )
 from optimal_transport.utils import cosine_similarity_matrix
 from math import log
 from sklearn.cluster import KMeans
 from sklearn.ensemble import IsolationForest
+import torch.nn.functional as F
 
 
 class IncrementalCovariance:
@@ -22,7 +21,6 @@ class IncrementalCovariance:
 
     def update(self, batch):
         batch = batch.to(self.device, non_blocking=True)
-
         self.n += batch.shape[0]
         self.sum_x += batch.sum(dim=0, keepdim=True)
         self.sum_sq_x += torch.matmul(batch.T, batch)
@@ -102,210 +100,182 @@ class FullMatchingModel(nn.Module):
     ):
         """
         Precompute covariance and whitening matrices.
-        If Sxx_total/Syy_total are provided, they are used for the geometry.
-        Otherwise, geometry is estimated from the pairs.
-        X_pairs/Y_pairs are always used for cross-correlation matrix (Sxy).
         """
-        # compute mean and covariance of all unpaired samples
-        if (
-            (Sxx_total is not None)
-            and (Syy_total is not None)
-            and (mean_x_total is not None)
-            and (mean_y_total is not None)
-        ):
-            self.Sxx = Sxx_total
-            self.Syy = Syy_total
-            self.x_mean = mean_x_total
-            self.y_mean = mean_y_total
-        else:
-            # fallback: compute mean and covariance of pairs
-            X_g = X_pairs
-            Y_g = Y_pairs
+        self.Sxx = Sxx_total
+        self.Syy = Syy_total
+        self.x_mean = mean_x_total
+        self.y_mean = mean_y_total
 
-            if self.anchor_center:
-                self.x_mean = X_g.mean(dim=0, keepdim=True)
-                self.y_mean = Y_g.mean(dim=0, keepdim=True)
-                X_g = X_g - self.x_mean
-                Y_g = Y_g - self.y_mean
-
-            denom_x = max(X_g.size(0) - 1, 1) if self.anchor_center else X_g.size(0)
-            denom_y = max(Y_g.size(0) - 1, 1) if self.anchor_center else Y_g.size(0)
-            self.Sxx = (X_g.T @ X_g) / denom_x
-            self.Syy = (Y_g.T @ Y_g) / denom_y
-
-        # compute Sxy of pairs
         X_p = X_pairs
         Y_p = Y_pairs
 
-        if self.anchor_center:
-            X_p = X_p - self.x_mean
-            Y_p = Y_p - self.y_mean
+        X_p = X_p - self.x_mean
+        Y_p = Y_p - self.y_mean
 
         denom_p = max(X_p.size(0) - 1, 1) if self.anchor_center else X_p.size(0)
         self.Sxy = (X_p.T @ Y_p) / denom_p
 
-        if self.anchor_whiten:
-            self.Wxx = self.sym_invsqrt(
-                self.Sxx, eps=self.anchor_lam_x, rank_k=self.anchor_rank_k_x
-            )
-            self.Wyy = self.sym_invsqrt(
-                self.Syy,
-                eps=self.anchor_lam_y,
-                rank_k=self.anchor_rank_k_y,
-            )
-            self.Sxy_w = self.Wxx @ self.Sxy @ self.Wyy
-        else:
-            self.Wxx = self.Wyy = self.Sxy_w = None
-
-    def init_cluster_anchors(
-        self,
-        all_X_pairs: torch.Tensor,
-        all_Y_pairs: torch.Tensor,
-        n_clusters=256,
-        outlier_fraction=0.05,
-        min_cluster_size=3,
-    ):
-        print(f"Initializing Joint Anchors (Max {n_clusters})...")
-
-        X_data = all_X_pairs.detach().float()
-        Y_data = all_Y_pairs.detach().float()
-        device = all_X_pairs.device
-        dtype = all_X_pairs.dtype
-
-        dx = X_data.shape[1]
-        dy = Y_data.shape[1]
-
-        if self.anchor_whiten:
-            if self.anchor_center:
-                X_data = X_data - self.x_mean
-                Y_data = Y_data - self.y_mean
-
-            X_norm = X_data @ self.Wxx
-            Y_norm = Y_data @ self.Wyy
-
-            X_balanced = X_norm / (dx**0.5)
-            Y_balanced = Y_norm / (dy**0.5)
-
-        else:
-            # z-score (diagonal whitening)
-            mean_x, std_x = X_data.mean(0), X_data.std(0).clamp(min=1e-8)
-            mean_y, std_y = Y_data.mean(0), Y_data.std(0).clamp(min=1e-8)
-
-            X_norm = (X_data - mean_x) / std_x
-            Y_norm = (Y_data - mean_y) / std_y
-
-        X_balanced = X_norm / (dx**0.5)
-        Y_balanced = Y_norm / (dy**0.5)
-
-        # concatenate and remove outliers
-        Z_joint = torch.cat([X_balanced, Y_balanced], dim=1)
-        Z_np = Z_joint.cpu().numpy()
-
-        iso = IsolationForest(
-            contamination=outlier_fraction, n_jobs=-1, random_state=42
-        )
-        preds = iso.fit_predict(Z_np)
-        mask_good = preds == 1
-
-        Z_clean = Z_np[mask_good]
-        indices_good = torch.tensor(mask_good, device=device)
-        X_raw_clean = all_X_pairs[indices_good]
-        Y_raw_clean = all_Y_pairs[indices_good]
-
-        print(f"  -> Dropped {len(Z_np) - len(Z_clean)} outlier pairs.")
-
-        # --- STEP 3: Joint Clustering ---
-        kmeans = KMeans(n_clusters=n_clusters, n_init="auto", random_state=42).fit(
-            Z_clean
-        )
-        labels = kmeans.labels_
-
-        # --- STEP 4: Aggregate Centroids (Original Space) ---
-        X_centroids_list = []
-        Y_centroids_list = []
-        labels_torch = torch.from_numpy(labels).to(device)
-
-        for k in range(n_clusters):
-            indices = labels_torch == k
-            if indices.sum().item() >= min_cluster_size:
-                X_centroids_list.append(X_raw_clean[indices].mean(dim=0))
-                Y_centroids_list.append(Y_raw_clean[indices].mean(dim=0))
-
-        if not X_centroids_list:
-            raise ValueError("All clusters pruned!")
-
-        X_centroids = torch.stack(X_centroids_list).to(dtype)
-        Y_centroids = torch.stack(Y_centroids_list).to(dtype)
-
-        # --- STEP 5: Register Anchors ---
-        self.register_buffer("raw_anchor_X", X_centroids)
-        self.register_buffer("raw_anchor_Y", Y_centroids)
-
-        # Immediate Projection for use (Consistent with self.anchor_whiten)
-        if self.anchor_whiten:
-            Ax = X_centroids
-            Ay = Y_centroids
-            if self.anchor_center:
-                Ax = Ax - self.x_mean
-                Ay = Ay - self.y_mean
-
-            Ax_proj = Ax @ self.Wxx
-            Ay_proj = Ay @ self.Wyy
-
-            self.anchor_X = Ax_proj / Ax_proj.norm(dim=1, keepdim=True).clamp(min=1e-8)
-            self.anchor_Y = Ay_proj / Ay_proj.norm(dim=1, keepdim=True).clamp(min=1e-8)
-        else:
-            # Fallback Normalization
-            self.anchor_X = X_centroids / X_centroids.norm(dim=1, keepdim=True).clamp(
-                min=1e-8
-            )
-            self.anchor_Y = Y_centroids / Y_centroids.norm(dim=1, keepdim=True).clamp(
-                min=1e-8
-            )
-
-        print(f"  -> Final Joint Anchors: {len(X_centroids)} clusters.")
-        return X_centroids, Y_centroids
-
-    def match_in_anchor_relative(self, X: torch.Tensor, Y: torch.Tensor):
+    def precompute_cca_projections(self, X, Y, lam=1e-6):
         """
-        Compute OT plan based on Similarity Profiles in the projected (whitened) space.
+        Compute CCA projection matrices.
+        X: (n_samples, d_x)
+        Y: (n_samples, d_y)
         """
-        with torch.no_grad():
-            epsilon_sinkhorn = self.epsilon_sinkhorn_anchor
-            n_iters_sinkhorn = self.n_iters_sinkhorn_anchor
-            eps = 1e-8
+        X = X.float()
+        Y = Y.float()
 
-            # --- 1. Apply Geometry (Whitening) ---
-            # If whitening is enabled, we project the batch into the shared spherical space
-            # so it matches the geometry of the projected anchors.
-            if self.anchor_whiten and (self.Wxx is not None):
-                # Center
-                if self.anchor_center:
-                    X = X - self.x_mean
-                    Y = Y - self.y_mean
+        device = X.device
 
-                # Project (Whiten)
-                # Note: self.Wxx/Wyy were computed using the supervised pairs.
-                X = X @ self.Wxx
-                Y = Y @ self.Wyy
+        Sigma_xx = self.Sxx + torch.eye(self.Sxx.size(0), device=device) * lam
+        Sigma_yy = self.Syy + torch.eye(self.Syy.size(0), device=device) * lam
 
-            # --- 2. Normalization (Required for Cosine Similarity) ---
-            # Even in whitened space, vectors have different lengths.
-            # We want directionality only.
-            X_norm = X / torch.norm(X, dim=1, keepdim=True).clamp(min=eps)
-            Y_norm = Y / torch.norm(Y, dim=1, keepdim=True).clamp(min=eps)
+        # compute A^{-1/2} via eigendecomposition
+        def compute_inv_sqrt(Sigma):
+            # eigenvalues (L) and eigenvectors (V)
+            L, V = torch.linalg.eigh(Sigma)
+            L = torch.clamp(L, min=lam)
+            L_inv_sqrt = torch.diag(1.0 / torch.sqrt(L))
+            return V @ L_inv_sqrt @ V.T
 
-            # --- 3. Compute Profiles ---
-            # self.anchor_X is ALREADY whitened and normalized in 'precompute_anchor_covariances'
-            Sim_X = torch.mm(X_norm, self.anchor_X.T)
-            Sim_Y = torch.mm(Y_norm, self.anchor_Y.T)
+        Sxx_inv_sqrt = compute_inv_sqrt(Sigma_xx)
+        Syy_inv_sqrt = compute_inv_sqrt(Sigma_yy)
 
-            # --- 4. Compute Distance & Sinkhorn ---
-            dist = -cosine_similarity_matrix(Sim_X, Sim_Y)
+        T = Sxx_inv_sqrt @ self.Sxy @ Syy_inv_sqrt
+        U, S, Vt = torch.linalg.svd(T, full_matrices=False)
 
-            res = sinkhorn(dist, epsilon=epsilon_sinkhorn, max_iter=n_iters_sinkhorn)
+        self.CCA_Wx = Sxx_inv_sqrt @ U
+        self.CCA_Wy = Syy_inv_sqrt @ Vt.T
 
-            return res["plan"], res["log_plan"]
+    # def init_cluster_anchors(
+    #     self,
+    #     all_X_pairs: torch.Tensor,
+    #     all_Y_pairs: torch.Tensor,
+    #     n_clusters=256,
+    #     outlier_fraction=0.05,
+    #     min_cluster_size=3,
+    # ):
+    #     print(f"Initializing Joint Anchors (Max {n_clusters})...")
+
+    #     X_data = all_X_pairs.detach().float()
+    #     Y_data = all_Y_pairs.detach().float()
+    #     device = all_X_pairs.device
+    #     dtype = all_X_pairs.dtype
+
+    #     dx = X_data.shape[1]
+    #     dy = Y_data.shape[1]
+
+    #     if self.anchor_whiten:
+    #         if self.anchor_center:
+    #             X_data = X_data - self.x_mean
+    #             Y_data = Y_data - self.y_mean
+
+    #         X_norm = X_data @ self.Wxx
+    #         Y_norm = Y_data @ self.Wyy
+
+    #         X_balanced = X_norm / (dx**0.5)
+    #         Y_balanced = Y_norm / (dy**0.5)
+
+    #     else:
+    #         mean_x, std_x = X_data.mean(0), X_data.std(0).clamp(min=1e-8)
+    #         mean_y, std_y = Y_data.mean(0), Y_data.std(0).clamp(min=1e-8)
+
+    #         X_norm = (X_data - mean_x) / std_x
+    #         Y_norm = (Y_data - mean_y) / std_y
+
+    #     X_balanced = X_norm / (dx**0.5)
+    #     Y_balanced = Y_norm / (dy**0.5)
+
+    #     Z_joint = torch.cat([X_balanced, Y_balanced], dim=1)
+    #     Z_np = Z_joint.cpu().numpy()
+
+    #     iso = IsolationForest(
+    #         contamination=outlier_fraction, n_jobs=-1, random_state=42
+    #     )
+    #     preds = iso.fit_predict(Z_np)
+    #     mask_good = preds == 1
+
+    #     Z_clean = Z_np[mask_good]
+    #     indices_good = torch.tensor(mask_good, device=device)
+    #     X_raw_clean = all_X_pairs[indices_good]
+    #     Y_raw_clean = all_Y_pairs[indices_good]
+
+    #     print(f"  -> Dropped {len(Z_np) - len(Z_clean)} outlier pairs.")
+
+    #     kmeans = KMeans(n_clusters=n_clusters, n_init="auto", random_state=42).fit(
+    #         Z_clean
+    #     )
+    #     labels = kmeans.labels_
+
+    #     X_centroids_list = []
+    #     Y_centroids_list = []
+    #     labels_torch = torch.from_numpy(labels).to(device)
+
+    #     for k in range(n_clusters):
+    #         indices = labels_torch == k
+    #         if indices.sum().item() >= min_cluster_size:
+    #             X_centroids_list.append(X_raw_clean[indices].mean(dim=0))
+    #             Y_centroids_list.append(Y_raw_clean[indices].mean(dim=0))
+
+    #     if not X_centroids_list:
+    #         raise ValueError("All clusters pruned!")
+
+    #     X_centroids = torch.stack(X_centroids_list).to(dtype)
+    #     Y_centroids = torch.stack(Y_centroids_list).to(dtype)
+
+    #     self.register_buffer("raw_anchor_X", X_centroids)
+    #     self.register_buffer("raw_anchor_Y", Y_centroids)
+
+    #     if self.anchor_whiten:
+    #         Ax = X_centroids
+    #         Ay = Y_centroids
+    #         if self.anchor_center:
+    #             Ax = Ax - self.x_mean
+    #             Ay = Ay - self.y_mean
+
+    #         Ax_proj = Ax @ self.Wxx
+    #         Ay_proj = Ay @ self.Wyy
+
+    #         self.anchor_X = Ax_proj / Ax_proj.norm(dim=1, keepdim=True).clamp(min=1e-8)
+    #         self.anchor_Y = Ay_proj / Ay_proj.norm(dim=1, keepdim=True).clamp(min=1e-8)
+    #     else:
+    #         self.anchor_X = X_centroids / X_centroids.norm(dim=1, keepdim=True).clamp(
+    #             min=1e-8
+    #         )
+    #         self.anchor_Y = Y_centroids / Y_centroids.norm(dim=1, keepdim=True).clamp(
+    #             min=1e-8
+    #         )
+
+    #     print(f"  -> Final Joint Anchors: {len(X_centroids)} clusters.")
+    #     return X_centroids, Y_centroids
+
+    # def match_in_anchor_relative(self, X: torch.Tensor, Y: torch.Tensor):
+    #     """
+    #     Compute OT plan based on Similarity Profiles in the projected (whitened) space.
+    #     """
+    #     with torch.no_grad():
+    #         epsilon_sinkhorn = self.epsilon_sinkhorn_anchor
+    #         n_iters_sinkhorn = self.n_iters_sinkhorn_anchor
+    #         eps = 1e-8
+
+    #         if self.anchor_whiten and (self.Wxx is not None):
+    #             if self.anchor_center:
+    #                 X = X - self.x_mean
+    #                 Y = Y - self.y_mean
+
+    #             X = X @ self.Wxx
+    #             Y = Y @ self.Wyy
+
+    #         X_norm = X / torch.norm(X, dim=1, keepdim=True).clamp(min=eps)
+    #         Y_norm = Y / torch.norm(Y, dim=1, keepdim=True).clamp(min=eps)
+
+    #         Sim_X = torch.mm(X_norm, self.anchor_X.T)
+    #         Sim_Y = torch.mm(Y_norm, self.anchor_Y.T)
+
+    #         dist = -cosine_similarity_matrix(Sim_X, Sim_Y)
+
+    #         res = sinkhorn(dist, epsilon=epsilon_sinkhorn, max_iter=n_iters_sinkhorn)
+
+    #         return res["plan"], res["log_plan"]
 
     def match_in_latent(self, fX: torch.Tensor, fY: torch.Tensor):
         """
@@ -339,39 +309,25 @@ class FullMatchingModel(nn.Module):
         Y: torch.Tensor,
     ):
         with torch.no_grad():
-            eps = 1e-8
             epsilon_sinkhorn, n_iters_sinkhorn = (
                 self.epsilon_sinkhorn_anchor,
                 self.n_iters_sinkhorn_anchor,
             )
-            if self.anchor_center:
-                Xc = X - self.x_mean
-                Yc = Y - self.y_mean
-            else:
-                Xc = X
-                Yc = Y
 
-            if self.anchor_relrenorm:
-                Xc = Xc / Xc.norm(dim=1, keepdim=True).clamp(min=eps)
-                Yc = Yc / Yc.norm(dim=1, keepdim=True).clamp(min=eps)
+            X = F.normalize(X, p=2, dim=1)
+            Y = F.normalize(Y, p=2, dim=1)
 
-            if self.anchor_whiten:
-                # Xw = Xc @ self.Wxx
-                # Yw = Yc @ self.Wyy
-                sim = Xc @ self.Sxy_w @ Yc.T
-                dist = -sim
+            X = X - self.x_mean
+            Y = Y - self.y_mean
 
-            else:
-                norm_X = (
-                    (X * (X @ self.Sxx)).sum(-1, keepdim=True).sqrt().clamp(min=eps)
-                )
-                norm_Y = (
-                    (Y * (Y @ self.Syy)).sum(-1, keepdim=True).sqrt().clamp(min=eps)
-                )
-                Xn = X / norm_X
-                Yn = Y / norm_Y
-                sim = Xn @ self.Sxy @ Yn.T
-                dist = -sim
+            X = X @ self.CCA_Wx
+            Y = Y @ self.CCA_Wy
+
+            X = F.normalize(X, p=2, dim=1)
+            Y = F.normalize(Y, p=2, dim=1)
+
+            sim = torch.mm(X, Y.T)
+            dist = -sim
 
             res = sinkhorn(dist, epsilon=epsilon_sinkhorn, max_iter=n_iters_sinkhorn)
 
@@ -438,30 +394,6 @@ class FullMatchingModel(nn.Module):
         target = -1 + 2 * torch.eye(len(fX_pairs), device=fX_pairs.device)
         loss = -torch.mean(torch.nn.functional.logsigmoid(target * logits))
         return loss
-
-    # def loss_semisupervised_sail(
-    #     self,
-    #     fX_pairs: torch.Tensor,
-    #     fY_pairs: torch.Tensor,
-    #     fX: torch.Tensor,
-    #     fY: torch.Tensor,
-    # ):
-    #     """
-    #     Sigmoid loss from SAIL paper, but with additional negatives.
-    #     Intuition: Contrastive learning.
-    #     """
-    #     device = fX_pairs.device
-    #     N = len(fX_pairs)
-
-    #     # X_all = torch.cat([fX_pairs, fX], dim=0) if fX is not None else fX_pairs
-    #     Y_all = torch.cat([fY_pairs, fY], dim=0) if fY is not None else fY_pairs
-    #     cosine_latent = cosine_similarity_matrix(fX_pairs, Y_all)
-    #     logits = cosine_latent * self.temperature_sail + self.bias_sail
-    #     target = -torch.ones((fX_pairs.size(0), Y_all.size(0)), device=device)
-    #     idx = torch.arange(N, device=device)
-    #     target[idx, idx] = 1.0
-    #     loss = -torch.mean(torch.nn.functional.logsigmoid(target * logits))
-    #     return loss
 
     def loss_semisupervised_sail(
         self,

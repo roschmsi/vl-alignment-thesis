@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from torch import optim
 import yaml
+import torch.nn.functional as F
 
 try:
     import wandb
@@ -371,6 +372,10 @@ def main(args):
             X_pairs = X_pairs.to(device, non_blocking=True)
             Y_pairs = Y_pairs.to(device, non_blocking=True)
 
+            # ensure normalization
+            X_pairs = F.normalize(X_pairs, p=2, dim=1)
+            Y_pairs = F.normalize(Y_pairs, p=2, dim=1)
+
             cov_tracker_X = IncrementalCovariance(device, hidden_dim=X_pairs.shape[1])
             cov_tracker_Y = IncrementalCovariance(device, hidden_dim=Y_pairs.shape[1])
 
@@ -380,6 +385,8 @@ def main(args):
 
             # add unpaired data
             for batch_x, batch_y in zip(text_loader, image_loader):
+                batch_x = F.normalize(batch_x, p=2, dim=1)
+                batch_y = F.normalize(batch_y, p=2, dim=1)
                 cov_tracker_X.update(batch_x)
                 cov_tracker_Y.update(batch_y)
 
@@ -394,6 +401,12 @@ def main(args):
                 Syy_total=Syy_total,
                 mean_x_total=mean_x_total,
                 mean_y_total=mean_y_total,
+            )
+
+            loss.precompute_cca_projections(
+                X=X_pairs,
+                Y=Y_pairs,
+                lam=args.anchor_lam_x,
             )
 
             if args.alpha_semisupervised_clusters > 0:

@@ -14,12 +14,13 @@ conda activate ot_env
 
 vision_model="facebook/dinov2-large"
 text_model="nvidia/NV-Embed-v2"
-data="cc3m"
+# data="imagenet1k"
+# domain="image"
+data="wikitext103"
 domain="text"
 batch_size=32
-source_caption="longSV_captions"
+source_caption="raw_caption"
 agg_mode="concat"
-input_dir="/lustre/groups/eml/projects/sroschmann/cc3m_recaptioned"
 output_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment"
 
 python /home/eml/simon.roschmann/ot-alignment/encode.py \
@@ -31,8 +32,8 @@ python /home/eml/simon.roschmann/ot-alignment/encode.py \
 --resume \
 --source_caption "$source_caption" \
 --agg_mode "$agg_mode" \
---input_dir "$input_dir" \
 --output_dir "$output_dir" \
 --num_workers 4
+# --input_dir "$input_dir" \
 # --start_shard_index 256
 # --end_shard_index 255

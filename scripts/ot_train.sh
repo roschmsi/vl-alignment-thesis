@@ -13,7 +13,7 @@ text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_
 # extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
 # image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_first100k.h5"
 # text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_first100k.h5"
-output_name="dinov2_nv2_cc3m_raw_10000_semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_fixwht"
+output_name="dinov2_nv2_cc3m_raw_10000_semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_cca_eps_0.5_deb"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
@@ -51,14 +51,15 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --alpha_semisupervised_ot 0.0001 \
     --anchor_center \
     --anchor_whiten \
-    --anchor_lam_x 0.4 \
+    --anchor_lam_x 0.5 \
     --anchor_lam_y 0.2 \
     --epsilon_sinkhorn_anchor 0.01 \
     --n_iters_sinkhorn_anchor 100 \
     --epsilon_sinkhorn_shared 0.1 \
     --n_iters_sinkhorn_shared 20 \
-    --anchor_relrenorm
+    --debugging
     # --debugging
+    # --anchor_relrenorm
     # --alpha_semisupervised_clusters 0.0001 \
     # --semisupervised_clusters 512 \
     # --outlier_fraction 0.01 \
