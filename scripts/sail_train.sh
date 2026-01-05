@@ -1,11 +1,11 @@
 #!/bin/bash
 
 epoch_num=30
-lr=1e-5
+lr=1e-4
 bs=32768
 d=1024
 width_factor=8
-logit_scale=20
+logit_scale=10
 logit_bias=-10
 
 text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption.h5"
@@ -32,7 +32,7 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --target-dimension $d \
     --linear-type linear \
     --log-every-n-steps 5 \
-    --wandb-project-name sail_train \
+    --wandb-project-name semisupervised_alignment \
     --name $output_name \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \

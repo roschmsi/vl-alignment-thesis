@@ -3,7 +3,7 @@
 vision_model="facebook/dinov2-large"
 text_model="nvidia/NV-Embed-v2"
 
-CKPT_DIR="/lustre/groups/eml/projects/sroschmann/ot_logs/dinov2_nv2_cc3m_raw_10000_semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_cca_eps_0.01/checkpoints"
+CKPT_DIR="/lustre/groups/eml/projects/sroschmann/ot_logs/a_dinov2_nv2_cc3m_nsup=10k_nunsup_100k_sclip_unimodal_pl=hard_unpaired_wimg=0.01_wtext=0_ep=300/checkpoints"
 DATASET_ROOT_DIR="/lustre/groups/eml/projects/sroschmann/data"
 
 shopt -s nullglob
@@ -12,6 +12,8 @@ shopt -s nullglob
 ckpts=("$CKPT_DIR"/epoch_*.pt)
 IFS=$'\n' ckpts=($(printf '%s\n' "${ckpts[@]}" | sort -V))
 unset IFS
+
+freq=10
 
 if [ ${#ckpts[@]} -eq 0 ]; then
     echo "No checkpoints found in $CKPT_DIR"
@@ -22,6 +24,10 @@ for ckpt_path in "${ckpts[@]}"; do
     fname=$(basename "$ckpt_path")
     epoch=${fname#epoch_}
     epoch=${epoch%.pt}
+
+    if (( epoch % freq != 0 )); then
+        continue
+    fi
 
     echo "########################################################"
     echo "Evaluating checkpoint: $ckpt_path"

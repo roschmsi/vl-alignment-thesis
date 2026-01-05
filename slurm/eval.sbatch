@@ -14,4 +14,4 @@
 source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
 conda activate ot_env
 
-bash /home/eml/simon.roschmann/ot-alignment/scripts/sail_eval.sh
+bash /home/eml/simon.roschmann/ot-alignment/scripts/eval.sh

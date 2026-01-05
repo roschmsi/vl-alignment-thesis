@@ -16,11 +16,15 @@ vision_model="facebook/dinov2-large"
 text_model="nvidia/NV-Embed-v2"
 # data="imagenet1k"
 # domain="image"
-data="wikitext103"
+# data="coco"
+# coco_caption_index=4
+data="diffusion_db"
 domain="text"
 batch_size=32
 source_caption="raw_caption"
 agg_mode="concat"
+input_dir="/lustre/groups/eml/projects/sroschmann/diffusion_db"
+# input_dir="/lustre/groups/eml/datasets/coco"
 output_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment"
 
 python /home/eml/simon.roschmann/ot-alignment/encode.py \
@@ -32,8 +36,9 @@ python /home/eml/simon.roschmann/ot-alignment/encode.py \
 --resume \
 --source_caption "$source_caption" \
 --agg_mode "$agg_mode" \
---output_dir "$output_dir" \
---num_workers 4
-# --input_dir "$input_dir" \
+--num_workers 4 \
+--input_dir "$input_dir" \
+--output_dir "$output_dir"
+# --coco_caption_index "$coco_caption_index"
 # --start_shard_index 256
 # --end_shard_index 255
