@@ -1,3 +1,4 @@
+import glob
 import logging
 import os
 import time
@@ -8,10 +9,15 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import torchvision
+from torchvision import transforms
+from datasets import load_dataset
+
 from model import ImageEmbedding, SentenceEmbedding
 from train.logger import setup_logging
 import webdataset as wds
 import h5py
+from data.embedding_data import DiffusionDBTextDataset
 
 setup_logging(log_file=None, level=logging.INFO)
 warnings.filterwarnings("ignore", message="Corrupt EXIF data")
@@ -23,7 +29,20 @@ def parse_args():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=str, required=True, help="Data type")
+    parser.add_argument(
+        "--data",
+        type=str,
+        required=True,
+        help="Data type",
+        choices=[
+            "cc3m",
+            "cc12m",
+            "imagenet1k",
+            "wikitext103",
+            "coco",
+            "diffusion_db",
+        ],
+    )
     parser.add_argument(
         "--vision_model_name", type=str, required=True, help="Model name"
     )
@@ -116,6 +135,12 @@ def parse_args():
         action="store_true",
         help="Only store hidden representations after every n-th layer",
     )
+    parser.add_argument(
+        "--coco_caption_index",
+        type=int,
+        default=0,
+        help="If set (0-4), extracts only the n-th caption per image. If None, extracts all.",
+    )
     return parser.parse_args()
 
 
@@ -168,7 +193,7 @@ def process_batch_from_loader(
         start_t = time.time()
         with torch.cuda.amp.autocast():
             with torch.no_grad():
-                batch_embeddings = model_func(batch_data)  # torch.Tensor
+                batch_embeddings = model_func(batch_data)
         end_t = time.time()
 
         # Bookkeeping
@@ -269,60 +294,6 @@ def process_batch_from_loader(
         logging.info(f"Total samples processed: {total_samples}")
 
 
-# def process_batch_from_loader(
-#     data_loader,
-#     model_func,
-#     start_index,
-#     batch_size,
-#     output_dir,
-#     resume,
-#     downsample=False,
-#     throughput=False,
-# ):
-#     idx = start_index // batch_size
-#     total_time = 0
-#     total_samples = 0
-#     for batch_data in tqdm(data_loader, desc="Encoding Batches"):
-#         output_path = os.path.join(output_dir, f"{idx}.pt")
-#         if resume and os.path.exists(output_path):
-#             idx += 1
-#             continue
-#         start_time = time.time()
-#         with torch.cuda.amp.autocast():
-#             with torch.no_grad():
-#                 batch_embeddings = model_func(batch_data).cpu()
-#         end_time = time.time()
-#         batch_time = end_time - start_time
-#         num_samples_in_batch = (
-#             len(batch_data) if isinstance(batch_data, list) else batch_data.size(0)
-#         )
-#         total_time += batch_time
-#         total_samples += num_samples_in_batch
-#         current_throughput = num_samples_in_batch / batch_time
-#         avg_throughput = total_samples / total_time
-
-#         # TODO check that there is only a single downsampling step
-#         if downsample:
-#             L = batch_embeddings.shape[-1]
-#             start = (L - 1) % 3
-#             batch_embeddings = batch_embeddings[:, :, start::3]
-
-#         if throughput:
-#             logging.info(
-#                 f"Batch {idx} throughput: {current_throughput:.2f} samples/sec, Avg: {avg_throughput:.2f} samples/sec"
-#             )
-#         else:
-#             batch_embeddings = batch_embeddings.half()
-#             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-#             torch.save(batch_embeddings, output_path)
-#         idx += 1
-#     if total_samples > 0 and total_time > 0:
-#         final_throughput = total_samples / total_time
-#         logging.info(f"Final average throughput: {final_throughput:.2f} samples/sec")
-#         logging.info(f"Total processing time: {total_time:.2f} seconds")
-#         logging.info(f"Total samples processed: {total_samples}")
-
-
 @torch.no_grad()
 def encode_text(args, data_loader, start_index):
     model_name = args.text_model_name.split("/")[-1]
@@ -332,7 +303,15 @@ def encode_text(args, data_loader, start_index):
     )
     print(f"Output directory: {output_dir}")
 
-    hdf5_path = os.path.join(output_dir, f"{args.data}_{args.source_caption}.h5")
+    if args.data == "diffusion_db":
+        hdf5_path = os.path.join(output_dir, "diffusion_db.h5")
+    else:
+        if args.data == "coco" and args.coco_caption_index is not None:
+            file_suffix = f"idx={args.coco_caption_index}"
+        else:
+            file_suffix = args.source_caption
+
+        hdf5_path = os.path.join(output_dir, f"{args.data}_{file_suffix}.h5")
 
     model = SentenceEmbedding(
         args.text_model_name, output_hidden_states=args.output_hidden_states
@@ -392,10 +371,9 @@ def encode_image(args, data_loader, start_index):
     )
 
 
-def load_data(data_path, source_caption, domain):
+def load_webdataset(data_path, source_caption, domain):
     """
     Loads and prepares data from a webdataset source.
-    This version is corrected to work with the enriched CC3M dataset structure.
     """
     logging.info(f"Setting up webdataset from path: {data_path}")
 
@@ -405,7 +383,12 @@ def load_data(data_path, source_caption, domain):
     if domain == "image":
 
         def image_extractor(sample):
-            return sample["jpg"]
+            if "jpg" in sample.keys():
+                return sample["jpg"]
+            elif "jpeg" in sample.keys():
+                return sample["jpeg"]
+            else:
+                raise ValueError("No key for jpg images.")
 
         dataset = dataset.map(image_extractor, handler=wds.warn_and_continue)
 
@@ -421,10 +404,58 @@ def load_data(data_path, source_caption, domain):
 
 def pil_collate_fn(batch):
     """
-    Collate function that returns a list of PIL Images.
-    This is used when the dataset yields individual PIL Images.
+    Collate function for WebDataset: returns a list of PIL Images.
     """
     return list(batch)
+
+
+def image_folder_collate_fn(batch):
+    """
+    Collate function for ImageNet/ImageFolder.
+    Batch is a list of (image, label) tuples.
+    We discard labels and return a list of PIL images.
+    """
+    images = [item[0] for item in batch]
+    return images
+
+
+def text_collate_fn(batch):
+    """
+    Collate function for WikiText/HuggingFace datasets.
+    Batch is a list of dicts: [{'text': '...'}, {'text': '...'}]
+    Returns a list of strings.
+    """
+    texts = [item["text"] for item in batch]
+    return texts
+
+
+def coco_image_collate_fn(batch):
+    return [item[0] for item in batch]
+
+
+def create_coco_text_collate_fn(index=None):
+    """
+    Creates a collate function that either flattens all captions
+    or selects a specific index (0-4).
+    """
+
+    def collate_fn(batch):
+        # batch is list of (image, captions_list)
+        outputs = []
+        for item in batch:
+            captions = item[1]
+            if index is not None:
+                # Select specific index.
+                # Use modulo in case an image has fewer captions than expected.
+                # (Standard COCO has 5, but safe is better)
+                idx = index % len(captions)
+                outputs.append(captions[idx])
+            else:
+                # Flatten all
+                outputs.extend(captions)
+        return outputs
+
+    return collate_fn
 
 
 def main():
@@ -432,54 +463,214 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    if args.data == "cc3m":
-        base_path = f"{args.input_dir}/cc3m-train-"
-        max_shard_index = 282
-    elif args.data == "cc12m":
-        base_path = f"{args.input_dir}/cc12m-train-"
-        max_shard_index = 1001
-    else:
-        raise ValueError(f"Unknown data: {args.data}.")
+    # --------------------------------------------------------
+    # 1. Handle WebDataset (CC3M / CC12M)
+    # --------------------------------------------------------
+    if args.data in ["cc3m", "cc12m"]:
+        if args.data == "cc3m":
+            base_path = f"{args.input_dir}/cc3m-train-"
+            max_shard_index = 282
+        else:  # cc12m
+            base_path = f"{args.input_dir}/cc12m-train-"
+            max_shard_index = 1001
 
-    start_index = args.start_shard_index if args.start_shard_index is not None else 0
-    end_index = (
-        args.end_shard_index if args.end_shard_index is not None else max_shard_index
-    )
+        start_index = (
+            args.start_shard_index if args.start_shard_index is not None else 0
+        )
+        end_index = (
+            args.end_shard_index
+            if args.end_shard_index is not None
+            else max_shard_index
+        )
 
-    data_path = f"{base_path}{{{start_index:04d}..{end_index:04d}}}.tar"
+        data_path = f"{base_path}{{{start_index:04d}..{end_index:04d}}}.tar"
+        logging.info(f"Processing shards from index {start_index} to {end_index}.")
+        logging.info(f"Constructed WebDataset path: {data_path}")
 
-    logging.info(f"Processing shards from index {start_index} to {end_index}.")
-    logging.info(f"Constructed WebDataset path: {data_path}")
+        dataset = load_webdataset(data_path, args.source_caption, args.domain)
 
-    dataset = load_data(data_path, args.source_caption, args.domain)
+        # For CC datasets, we use shards to approximate start indices
+        samples_per_shard = 10000
+        sample_start_index = start_index * samples_per_shard
 
-    samples_per_shard = 10000
-    sample_start_index = start_index * samples_per_shard
+        if args.domain == "text":
+            data_loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                shuffle=False,
+            )
+            logging.info(
+                f"Encoding text data '{args.data}' ({args.source_caption}) with model {args.text_model_name}..."
+            )
+            encode_text(args, data_loader, sample_start_index)
 
-    if args.domain == "text":
+        elif args.domain == "image":
+            data_loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                shuffle=False,
+                collate_fn=pil_collate_fn,
+            )
+            logging.info(
+                f"Encoding image data '{args.data}' with model {args.vision_model_name}..."
+            )
+            encode_image(args, data_loader, sample_start_index)
+
+    elif args.data == "imagenet1k":
+        assert args.domain == "image", "ImageNet is an image dataset."
+
+        # Scan input_dir for train_images_*.tar.gz
+        shard_pattern = os.path.join(args.input_dir, "train_images_*.tar.gz")
+        found_shards = sorted(glob.glob(shard_pattern))
+
+        if found_shards:
+            # We found sharded tars! Use WebDataset.
+            # Convert list of files to brace expansion string or just use list
+            # WebDataset supports direct list of files in recent versions,
+            # or we can construct a brace string if strictly numbered.
+            logging.info(
+                f"Found {len(found_shards)} sharded tar files. Using WebDataset loader."
+            )
+
+            # Simple way: Pass the pattern directly if wds supports it, or the list
+            # We will use the brace expansion string if they are contiguous
+            if len(found_shards) > 1:
+                # Assuming simple numbering for brevity, or just join them
+                # WebDataset can take a list of strings in the constructor
+                data_path = found_shards
+            else:
+                data_path = found_shards[0]
+
+            dataset = load_webdataset(data_path, args.source_caption, args.domain)
+
+            data_loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                shuffle=False,
+                collate_fn=pil_collate_fn,
+            )
+            logging.info(
+                f"Encoding ImageNet shards with model {args.vision_model_name}..."
+            )
+            encode_image(args, data_loader, args.start_index)
+
+        else:
+            # Fallback: Check for extracted folder structure
+            logging.warning(
+                "No 'train_images_*.tar.gz' shards found. Checking for extracted folder..."
+            )
+            if os.path.isdir(os.path.join(args.input_dir, "train")):
+                # Standard ImageNet structure: input_dir/train/class_xxx/img.jpg
+                root = os.path.join(args.input_dir, "train")
+                dataset = torchvision.datasets.ImageFolder(root=root, transform=None)
+                data_loader = DataLoader(
+                    dataset,
+                    batch_size=args.batch_size,
+                    num_workers=args.num_workers,
+                    shuffle=False,
+                    collate_fn=image_folder_collate_fn,
+                )
+                logging.info(
+                    f"Encoding Extracted ImageNet with model {args.vision_model_name}..."
+                )
+                encode_image(args, data_loader, args.start_index)
+            else:
+                raise FileNotFoundError(
+                    f"Could not find 'train_images_*.tar.gz' shards OR a 'train/' directory in {args.input_dir}. "
+                    "Please ensure your data is either sharded or extracted."
+                )
+
+    elif args.data == "wikitext103":
+        assert args.domain == "text", "WikiText-103 is a text dataset."
+        logging.info("Loading WikiText-103 (raw-v1) via Hugging Face Datasets...")
+
+        dataset = load_dataset(
+            "wikitext",
+            "wikitext-103-v1",
+            split="train",
+            trust_remote_code=True,
+        )
+
+        dataset = dataset.filter(lambda x: len(x["text"].strip()) > 0)
+
+        data_loader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            shuffle=False,
+            collate_fn=text_collate_fn,
+        )
+
+        logging.info(f"Encoding WikiText data with model {args.text_model_name}...")
+        encode_text(args, data_loader, args.start_index)
+
+    elif args.data == "coco":
+        coco_root = os.path.join(args.input_dir, "images", "train2017")
+        coco_ann = os.path.join(
+            args.input_dir, "annotations", "captions_train2017.json"
+        )
+        if not os.path.exists(coco_root) or not os.path.exists(coco_ann):
+            raise FileNotFoundError(
+                f"COCO dataset not found.\nExpected {coco_root} and {coco_ann}"
+            )
+
+        logging.info(f"Loading COCO Captions from {coco_root}")
+        dataset = torchvision.datasets.CocoCaptions(
+            root=coco_root, annFile=coco_ann, transform=None
+        )
+
+        if args.domain == "image":
+            data_loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                shuffle=False,
+                collate_fn=coco_image_collate_fn,
+            )
+            encode_image(args, data_loader, args.start_index)
+
+        elif args.domain == "text":
+            # DYNAMIC COLLATE FUNCTION CREATION
+            # If args.coco_caption_index is 0, we only take the 1st caption.
+            collate_fn = create_coco_text_collate_fn(args.coco_caption_index)
+
+            data_loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                shuffle=False,
+                collate_fn=collate_fn,
+            )
+
+            msg = (
+                f"Encoding COCO Captions (Index: {args.coco_caption_index})..."
+                if args.coco_caption_index is not None
+                else "Encoding ALL COCO Captions (flattened)..."
+            )
+            logging.info(msg)
+
+            encode_text(args, data_loader, args.start_index)
+
+    elif args.data == "diffusion_db":
+        assert args.domain == "text", "We only utilize the prompts of DiffusionDB."
+        logging.info("Loading DiffusionDB prompts...")
+
+        dataset = DiffusionDBTextDataset(
+            csv_file=f"{args.input_dir}/unique_prompts.csv"
+        )
+
         data_loader = DataLoader(
             dataset,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             shuffle=False,
         )
-        logging.info(
-            f"Encoding text data '{args.data}' ({args.source_caption}) with model {args.text_model_name}..."
-        )
-        encode_text(args, data_loader, sample_start_index)
 
-    elif args.domain == "image":
-        data_loader = DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            shuffle=False,
-            collate_fn=pil_collate_fn,
-        )
-        logging.info(
-            f"Encoding image data '{args.data}' with model {args.vision_model_name}..."
-        )
-        encode_image(args, data_loader, sample_start_index)
+        logging.info(f"Encoding DiffusionDB text with model {args.text_model_name}...")
+        encode_text(args, data_loader, args.start_index)
 
 
 if __name__ == "__main__":
