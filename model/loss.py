@@ -150,7 +150,7 @@ class ClipLoss(nn.Module):
         logit_scale=np.log(1 / 0.07),
         output_dict=False,
         *args,
-        **kwargs
+        **kwargs,
     ):
         device = image_features.device
         logits_per_image, logits_per_text = self.get_logits(
@@ -527,7 +527,7 @@ class SigLipLoss(nn.Module):
         logit_bias,
         logits_per_text=None,
         output_dict=False,
-        **kwargs
+        **kwargs,
     ):
 
         loss = self._loss(
@@ -590,6 +590,96 @@ class SigLipLoss(nn.Module):
         #             text_features_to_right = text_features_from_left
         return loss if output_dict else loss["contrastive_loss"]
         # return {"contrastive_loss": loss, "loss_high_temp": loss_high_temp, "loss_low_temp": loss_low_temp} if output_dict else loss
+
+
+class SigLipLossWithNNPositives(SigLipLoss):
+    """
+    One positive per sample (per iteration), with separate matrices & weights.
+
+    Inputs:
+      image_features:     (B, D) anchors
+      text_features:      (B, D) anchors
+      pos_text_features:  (B, D) one text-positive per image anchor (or None)
+      pos_image_features: (B, D) one image-positive per text anchor (or None)
+
+    Losses:
+      base:     image vs text
+      text_pos: image vs pos_text
+      img_pos:  text  vs pos_image
+
+    Total = w_base*base + w_text_pos*text_pos + w_image_pos*img_pos
+    """
+
+    def __init__(self, *args, w_base=1.0, w_text_nn=0.0, w_image_nn=0.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.w_base = float(w_base)
+        self.w_text_nn = float(w_text_nn)
+        self.w_image_nn = float(w_image_nn)
+
+    def _labels_diag(self, B, device, dtype):
+        labels = -torch.ones((B, B), device=device, dtype=dtype)
+        labels = labels + 2.0 * torch.eye(
+            B, device=device, dtype=dtype
+        )  # diag becomes +1
+        return labels
+
+    def _siglip_mat(self, a, b, logit_scale, logit_bias=None):
+        # a: (B,D), b: (B,D) -> logits (B,B)
+        logits = logit_scale * (a @ b.T)
+        if logit_bias is not None:
+            logits = logits + logit_bias
+        labels = self._labels_diag(a.shape[0], device=a.device, dtype=logits.dtype)
+        return -F.logsigmoid(labels * logits).mean()
+
+    def forward(
+        self,
+        image_features,
+        text_features,
+        image_nn_features,  # (B,D) or None
+        text_nn_features,  # (B,D) or None
+        logit_scale,
+        logit_bias=None,
+        output_dict=True,
+        **kwargs,
+    ):
+        # normalize everything
+        image_features = F.normalize(image_features, p=2, dim=-1)
+        text_features = F.normalize(text_features, p=2, dim=-1)
+
+        base = self._siglip_mat(image_features, text_features, logit_scale, logit_bias)
+        total = self.w_base * base
+
+        out = {"siglip": base.detach(), "w_base": self.w_base}
+
+        if text_nn_features is not None and self.w_text_nn != 0.0:
+            text_nn_features = F.normalize(text_nn_features, p=2, dim=-1)
+            l_text_nn = self._siglip_mat(
+                image_features, text_nn_features, logit_scale, logit_bias
+            )
+            total = total + self.w_text_nn * l_text_nn
+            out.update(
+                {
+                    "siglip_text_nn": l_text_nn.detach(),
+                    "w_text_nn": self.w_text_nn,
+                }
+            )
+        else:
+            out["siglip_text_nn"] = 0
+
+        if image_nn_features is not None and self.w_image_nn != 0.0:
+            image_nn_features = F.normalize(image_nn_features, p=2, dim=-1)
+            l_image_nn = self._siglip_mat(
+                text_features, image_nn_features, logit_scale, logit_bias
+            )
+            total = total + self.w_image_nn * l_image_nn
+            out.update(
+                {"siglip_image_nn": l_image_nn.detach(), "w_image_nn": self.w_image_nn}
+            )
+        else:
+            out["siglip_image_nn"] = 0
+
+        out["total_loss"] = total
+        return out if output_dict else total
 
 
 class BarlowTwinsLoss(nn.Module):
