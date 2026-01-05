@@ -3,11 +3,9 @@ import glob
 import logging
 import os
 import re
-import subprocess
 import sys
 import random
 from datetime import datetime
-from functools import partial
 import math
 import numpy as np
 import torch
@@ -25,20 +23,17 @@ from train.params import parse_args
 from train.logger import setup_logging, format_num_params
 from train.scheduler import cosine_lr, const_lr, const_lr_cooldown
 from train.distributed import is_master, init_distributed_device, broadcast_object
-from train.file_utils import pt_load, check_exists
+from train.file_utils import pt_load
 from train.train import (
     _collect_all_batches,
-    train_one_epoch,
     evaluate,
-    train_one_epoch_ot,
-    train_one_epoch_ot_semisupervised,
-    train_one_epoch_ot_supervised,
+    train_one_epoch_semisupervised,
+    train_one_epoch_supervised,
 )
 from train.optimizer import Lion
 
 from model import create_model, create_loss, create_loss
 from data import get_data
-import pdb
 
 
 LATEST_CHECKPOINT_NAME = "epoch_latest.pt"
@@ -362,7 +357,7 @@ def main(args):
 
     loss = create_loss(args)
 
-    if args.alpha_semisupervised_ot > 0 or args.alpha_semisupervised_clusters > 0:
+    if args.ot:
         with torch.no_grad():
             bimodal_loader = data["train"].bimodal_loader
             text_loader = data["train"].text_loader
@@ -406,7 +401,8 @@ def main(args):
             loss.precompute_cca_projections(
                 X=X_pairs,
                 Y=Y_pairs,
-                lam=args.anchor_lam_x,
+                lam_x=args.anchor_lam_x,
+                lam_y=args.anchor_lam_y,
             )
 
             if args.alpha_semisupervised_clusters > 0:
@@ -422,23 +418,20 @@ def main(args):
         if is_master(args):
             logging.info(f"Start epoch {epoch}")
 
-        if args.ot:
-            if args.semisupervised:
-                train_one_epoch_ot_semisupervised(
-                    model, data, loss, epoch, optimizer, scaler, scheduler, args
-                )
-            elif args.supervised:
-                train_one_epoch_ot_supervised(
-                    model, data, loss, epoch, optimizer, scaler, scheduler, args
-                )
-            else:
-                train_one_epoch_ot(
-                    model, data, loss, epoch, optimizer, scaler, scheduler, args
-                )
-        else:
-            train_one_epoch(
+        if args.semisupervised:
+            train_one_epoch_semisupervised(
                 model, data, loss, epoch, optimizer, scaler, scheduler, args
             )
+        elif args.supervised:
+            train_one_epoch_supervised(
+                model, data, loss, epoch, optimizer, scaler, scheduler, args
+            )
+        else:
+            raise ValueError("Please specify either --semisupervised or --supervised.")
+
+        #     train_one_epoch(
+        #         model, data, loss, epoch, optimizer, scaler, scheduler, args
+        #     )
 
         completed_epoch = epoch + 1
 

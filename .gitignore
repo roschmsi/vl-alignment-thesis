@@ -3,3 +3,4 @@
 wandb
 *.pt
 *.json
+plots/

@@ -1,12 +1,9 @@
+from model.sclip import SemiSupervisedClipLoss
 from optimal_transport.matching import FullMatchingModel
 from .sail_model import AlignmentLayer, SAILModel, ShareLockAlignmentLayer
-from .loss import ClipLoss, SigLipLoss, BarlowTwinsLoss
-from .vision_model import ImageEmbedding
-from .language_model import SentenceEmbedding
+from .loss import ClipLoss, SigLipLoss, SigLipLossWithNNPositives
 from typing import Union, Optional
 import torch
-import os
-import pdb
 
 
 def get_input_dtype(precision: str):
@@ -92,7 +89,24 @@ def create_model(
 
 
 def create_loss(args):
-    if args.ot:
+    if args.nnclr:
+        return SigLipLossWithNNPositives(
+            w_text_nn=args.w_text_nn,
+            w_image_nn=args.w_image_nn,
+        )
+    if args.sclip:
+        print("Using S-CLIP loss")
+        return SemiSupervisedClipLoss(
+            method=args.sclip_method,
+            unpaired_modality=args.sclip_unpaired_modality,
+            space=args.sclip_space,
+            pseudo_label_type=args.sclip_pseudo_label_type,
+            weight_unpaired_images=args.sclip_weight_unpaired_images,
+            weight_unpaired_texts=args.sclip_weight_unpaired_texts,
+            rank=args.rank,
+            world_size=args.world_size,
+        )
+    elif args.ot:
         loss_config = {
             "divergence": args.divergence,
             # Loss weights
@@ -105,6 +119,9 @@ def create_loss(args):
             "alpha_semisupervised_clusters": args.alpha_semisupervised_clusters,
             "alpha_semisupervised_sail": args.alpha_semisupervised_sail,
             "alpha_semisupervised_div": args.alpha_semisupervised_div,
+            "alpha_semisupervised_double_softmax": args.alpha_semisupervised_double_softmax,
+            "alpha_semisupervised_conditional_kl": args.alpha_semisupervised_conditional_kl,
+            "alpha_semisupervised_joint_kl": args.alpha_semisupervised_joint_kl,
             "alpha_unsupervised": args.alpha_unsupervised,
             # Sinkhorn params
             "epsilon_sinkhorn_shared": args.epsilon_sinkhorn_shared,
@@ -114,6 +131,8 @@ def create_loss(args):
             # SAIL
             "temperature_sail": args.temperature_sail,
             "bias_sail": args.bias_sail,
+            # softmax kl approaches
+            "temperature_softmax": args.temperature_softmax,
             # anchors advanced
             "anchor_center": args.anchor_center,
             "anchor_whiten": args.anchor_whiten,

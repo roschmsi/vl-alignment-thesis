@@ -714,6 +714,26 @@ def parse_args(args):
         default=None,
     )
     parser.add_argument(
+        "--alpha_semisupervised_double_softmax",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--alpha_semisupervised_conditional_kl",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--alpha_semisupervised_joint_kl",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--temperature_softmax",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
         "--outlier_fraction",
         type=float,
         help="Fraction of outliers to remove when initializing cluster anchors.",
@@ -765,6 +785,7 @@ def parse_args(args):
         "--divergence",
         type=str,
         default="cosine",
+        choices=["cosine", "frobenius"],
     )
     parser.add_argument(
         "--temperature_sail",
@@ -788,6 +809,16 @@ def parse_args(args):
     )
     parser.add_argument(
         "--n_supervised_pairs",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--n_unsupervised_text",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--n_unsupervised_image",
         type=int,
         default=None,
     )
@@ -853,6 +884,127 @@ def parse_args(args):
         default=False,
         action="store_true",
         help="If true, use debugging mode with smaller datasets.",
+    )
+    # supervised and unsupervised embeddings
+    parser.add_argument(
+        "--supervised_text_embedding",
+        nargs="+",
+        default=None,
+        help="Path to supervised text embedding.",
+    )
+    parser.add_argument(
+        "--unsupervised_text_embedding",
+        nargs="*",
+        default=None,
+        help="Path to unsupervised text embedding.",
+    )
+    parser.add_argument(
+        "--supervised_image_embedding",
+        nargs="+",
+        default=None,
+        help="Path to supervised image embedding.",
+    )
+    parser.add_argument(
+        "--unsupervised_image_embedding",
+        nargs="*",
+        default=None,
+        help="Path to unsupervised image embedding.",
+    )
+    parser.add_argument(
+        "--text_nn_positives",
+        type=int,
+        default=0,
+        help="Number of positive nearest neighbors for text.",
+    )
+    parser.add_argument(
+        "--image_nn_positives",
+        type=int,
+        default=0,
+        help="Number of positive nearest neighbors for image.",
+    )
+    parser.add_argument(
+        "--text_neighbors_path",
+        type=str,
+        default=None,
+        help="Path to text neighbors file.",
+    )
+    parser.add_argument(
+        "--image_neighbors_path",
+        type=str,
+        default=None,
+        help="Path to image neighbors file.",
+    )
+    parser.add_argument(
+        "--text_topk",
+        type=int,
+        default=10000,
+        help="Top-k neighbors for text.",
+    )
+    parser.add_argument(
+        "--image_topk",
+        type=int,
+        default=10000,
+        help="Top-k neighbors for image.",
+    )
+    parser.add_argument(
+        "--nnclr",
+        default=False,
+        action="store_true",
+        help="If true, use nearest neighbor contrastive loss.",
+    )
+    parser.add_argument("--w_base", default=0, type=float)
+    parser.add_argument("--w_text_nn", default=0, type=float)
+    parser.add_argument("--w_image_nn", default=0, type=float)
+
+    parser.add_argument(
+        "--sclip",
+        default=False,
+        action="store_true",
+        help="Use SCLIP loss.",
+    )
+    parser.add_argument(
+        "--sclip_method",
+        type=str,
+        choices=["base", "pseudo-labels"],
+        help="Method for SCLIP loss.",
+    )
+    parser.add_argument(
+        "--sclip_unpaired_modality",
+        type=str,
+        choices=[
+            "image",
+            "text",
+            "both",
+        ],
+        help="Modality of unpaired data for SCLIP loss.",
+    )
+    parser.add_argument(
+        "--sclip_space",
+        type=str,
+        choices=["unimodal", "bimodal"],
+        help="Space in which to find pseudo labels for SCLIP loss.",
+    )
+    parser.add_argument(
+        "--sclip_pseudo_label_type",
+        type=str,
+        choices=[
+            "hard",
+            "soft",
+            "ot",
+        ],
+        help="Pseudo label type for SCLIP loss.",
+    )
+    parser.add_argument(
+        "--sclip_weight_unpaired_images",
+        type=float,
+        default=0.0,
+        help="Weight for unpaired images in SCLIP loss.",
+    )
+    parser.add_argument(
+        "--sclip_weight_unpaired_texts",
+        type=float,
+        default=0.0,
+        help="Weight for unpaired texts in SCLIP loss.",
     )
 
     args = parser.parse_args(args)
