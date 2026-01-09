@@ -13,74 +13,143 @@ def get_embedding_strategy(model_name):
             return strategy
     raise ValueError(f"No embedding strategy found for model: {model_name}")
 
-def last_token_pool(model_output: torch.Tensor,
-                 attention_mask: torch.Tensor) -> torch.Tensor:
+
+def last_token_pool(
+    model_output: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
     last_hidden_states = model_output.last_hidden_state
-    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+    left_padding = attention_mask[:, -1].sum() == attention_mask.shape[0]
     if left_padding:
         return last_hidden_states[:, -1]
     else:
         sequence_lengths = attention_mask.sum(dim=1) - 1
         batch_size = last_hidden_states.shape[0]
-        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+        return last_hidden_states[
+            torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths
+        ]
+
 
 def mean_pooling(model_output: torch.Tensor, attention_mask):
-    token_embeddings = model_output[0]  # First element of model_output contains all token embeddings
-    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+    token_embeddings = model_output[
+        0
+    ]  # First element of model_output contains all token embeddings
+    input_mask_expanded = (
+        attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    )
+    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+        input_mask_expanded.sum(1), min=1e-9
+    )
+
+
+def average_pooling_nemotron(
+    last_hidden_states: torch.Tensor, attention_mask: torch.Tensor
+) -> torch.Tensor:
+    """Average pooling with attention mask."""
+
+    last_hidden_states = last_hidden_states.to(torch.float32)
+    last_hidden_states_masked = last_hidden_states.masked_fill(
+        ~attention_mask[..., None].bool(), 0.0
+    )
+    embedding = (
+        last_hidden_states_masked.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+    )
+    # embedding = F.normalize(embedding, dim=-1)
+
+    return embedding
+
 
 def bos_pooling(model_output: torch.Tensor, attention_mask):
-    return model_output.last_hidden_state[:,0]
+    return model_output.last_hidden_state[:, 0]
 
-MODEL_EMBEDDING_TYPE={
-    'mean': ['sentence-transformers/all-mpnet-base-v2'],
-    'BOS' : ['Alibaba-NLP/gte-large-en-v1.5','Alibaba-NLP/gte-base-en-v1.5'],
-    "LastToken": ['Alibaba-NLP/gte-Qwen2-7B-instruct',"Alibaba-NLP/gte-Qwen2-1.5B-instruct"],
+
+MODEL_EMBEDDING_TYPE = {
+    "mean": [
+        "sentence-transformers/all-mpnet-base-v2",
+        "nvidia/llama-embed-nemotron-8b",
+    ],
+    "BOS": ["Alibaba-NLP/gte-large-en-v1.5", "Alibaba-NLP/gte-base-en-v1.5"],
+    "LastToken": [
+        "Alibaba-NLP/gte-Qwen2-7B-instruct",
+        "Alibaba-NLP/gte-Qwen2-1.5B-instruct",
+        "Qwen/Qwen3-Embedding-8B",
+    ],
 }
 
 POOL_CLASSES = {
-    'mean': mean_pooling,
-    'BOS' : bos_pooling,
-    'LastToken' : last_token_pool,
-}   
+    "mean": mean_pooling,
+    "BOS": bos_pooling,
+    "LastToken": last_token_pool,
+}
+
 
 class SentenceEmbedding(nn.Module):
-    def __init__(self, model_name='sentence-transformers/all-mpnet-base-v2', output_hidden_states=False):
+    def __init__(
+        self,
+        model_name="sentence-transformers/all-mpnet-base-v2",
+        output_hidden_states=False,
+    ):
         super(SentenceEmbedding, self).__init__()
         self.model_name = model_name
-        if not any(x in model_name for x in ['NV', 'clip']):
+
+        if not any(x in model_name for x in ["NV", "clip"]):
             self.pooling = POOL_CLASSES[get_embedding_strategy(model_name)]
-        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        if 'clip' in model_name:
-            self.model = CLIPTextModel.from_pretrained(model_name, device_map=self.device).half()
+
+        self.device = (
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        )
+
+        if any(x in model_name for x in ["qwen", "nemotron"]):
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name, padding_side="left"
+            )
         else:
-            self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True, device_map=self.device).half()
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        if "clip" in model_name:
+            self.model = CLIPTextModel.from_pretrained(
+                model_name, device_map=self.device
+            ).half()
+        else:
+            self.model = AutoModel.from_pretrained(
+                model_name, trust_remote_code=True, device_map=self.device
+            ).half()
         self.output_hidden_states = output_hidden_states
 
-        #
-        mod = importlib.import_module(self.model.__class__.__module__)
-        self.input_transform_func = getattr(mod, "input_transform_func")
-    
-    def mean_pooling(self, model_output: torch.Tensor, attention_mask):
-        token_embeddings = model_output[0]  # First element of model_output contains all token embeddings
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        self.model.config.use_cache = False
 
-    def pool_tokens_per_layer(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        if "NV" in self.model_name:
+            mod = importlib.import_module(self.model.__class__.__module__)
+            self.input_transform_func = getattr(mod, "input_transform_func")
+
+    def mean_pooling(self, model_output: torch.Tensor, attention_mask):
+        token_embeddings = model_output[
+            0
+        ]  # First element of model_output contains all token embeddings
+        input_mask_expanded = (
+            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        )
+        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+            input_mask_expanded.sum(1), min=1e-9
+        )
+
+    def pool_tokens_per_layer(
+        self, hidden_states: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
         B = hidden_states.shape[0]
         hidden_states = hidden_states.permute(3, 0, 1, 2)
         attention_mask = attention_mask.to(hidden_states.dtype)
-        numer = torch.einsum("lbtd,bt->lbd", hidden_states, attention_mask)     # sum over tokens
+        numer = torch.einsum(
+            "lbtd,bt->lbd", hidden_states, attention_mask
+        )  # sum over tokens
         denom = attention_mask.sum(dim=1).clamp_min(1e-9).view(1, B, 1)  # (1,B,1)
         hidden_states_mean = numer / denom
         return hidden_states_mean
-    
+
     def get_sentence_embeddings(self, sentences: List[str]):
         if self.output_hidden_states:
             with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):
 
-                if 'NV' in self.model_name:
+                if "NV" in self.model_name:
 
                     # embeddings = self.model.encode(sentences, max_length=1024).half()
                     batch_dict = self.input_transform_func(
@@ -88,7 +157,7 @@ class SentenceEmbedding(nn.Module):
                         {"input_texts": [prompt for prompt in sentences]},
                         always_add_eos=True,
                         max_length=1024,
-                        instruction=""
+                        instruction="",
                     )
 
                     features = self.model.prepare_kwargs_from_batch(
@@ -96,15 +165,15 @@ class SentenceEmbedding(nn.Module):
                     )
 
                     outputs = self.model.embedding_model(
-                        input_ids=features['input_ids'],
-                        attention_mask=features['attention_mask'],
+                        input_ids=features["input_ids"],
+                        attention_mask=features["attention_mask"],
                         output_hidden_states=True,
                         return_dict=True,
                     )
 
                     embeds = self.model.latent_attention_model(
                         outputs.last_hidden_state,
-                        features['pool_mask'],
+                        features["pool_mask"],
                     )
 
                     hidden_states = outputs.hidden_states
@@ -112,7 +181,9 @@ class SentenceEmbedding(nn.Module):
 
                     # pool mask and attention mask are the same
                     # TODO still check if aggregation is correct
-                    hidden_states = self.pool_tokens_per_layer(hidden_states, features["attention_mask"]).half()
+                    hidden_states = self.pool_tokens_per_layer(
+                        hidden_states, features["attention_mask"]
+                    ).half()
 
                     embeds = embeds.unsqueeze(0)
                     combined = torch.cat([hidden_states, embeds], dim=0)
@@ -122,12 +193,12 @@ class SentenceEmbedding(nn.Module):
 
                 else:
 
-                    raise ValueError('Not implemented')
+                    raise ValueError("Not implemented")
 
                 # inputs = self.tokenizer(
                 #     text=sentences, padding=True, truncation=True, return_tensors="pt"
                 # ).to(self.device)
-                
+
                 # if 'NV' in self.model_name:
                 #     enc_out = self.model.embedding_model(
                 #         **inputs, output_hidden_states=True, return_dict=True
@@ -139,39 +210,64 @@ class SentenceEmbedding(nn.Module):
 
         else:
             # Tokenize sentences
-            if 'NV' in self.model_name: 
-                with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):  # or bfloat16
+            if "NV" in self.model_name:
+                with torch.autocast(
+                    device_type=self.device.type, dtype=self.model.dtype
+                ):  # or bfloat16
                     embeddings = self.model.encode(sentences, max_length=1024).half()
                     return embeddings
-            elif 'clip' in self.model_name:
-                with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):  # or bfloat16
-                    inputs = self.tokenizer(sentences, padding=True, truncation=True, return_tensors='pt').to(self.device)
+            elif "clip" in self.model_name:
+                with torch.autocast(
+                    device_type=self.device.type, dtype=self.model.dtype
+                ):  # or bfloat16
+                    inputs = self.tokenizer(
+                        sentences, padding=True, truncation=True, return_tensors="pt"
+                    ).to(self.device)
                     outputs = self.model(**inputs)
                     embeddings = outputs.pooler_output
                     return embeddings
             else:
-                encoded_input = self.tokenizer(sentences, padding=True, truncation=True, max_length=1024, return_tensors='pt').to(self.device)
+                encoded_input = self.tokenizer(
+                    sentences,
+                    padding=True,
+                    truncation=True,
+                    max_length=1024,
+                    return_tensors="pt",
+                ).to(self.device)
                 return self.forward(encoded_input)
-        
+
     def forward(self, inputs):
         # Compute token embeddings
-        if 'clip' in self.model_name:
-            with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):  # or bfloat16
+        if "clip" in self.model_name:
+            with torch.autocast(
+                device_type=self.device.type, dtype=self.model.dtype
+            ):  # or bfloat16
                 model_output = self.model(**inputs)
             sentence_embeddings = model_output.pooler_output
-        else:
-            with torch.autocast(device_type=self.device.type, dtype=self.model.dtype):  # or bfloat16
+        elif "nemotron" in self.model_name:
+            with torch.autocast(
+                device_type=self.device.type, dtype=self.model.dtype
+            ):  # or bfloat16
                 model_output = self.model(**inputs)
-            sentence_embeddings = self.pooling(model_output, inputs['attention_mask'])
+            sentence_embeddings = average_pooling_nemotron(
+                model_output.last_hidden_state, inputs["attention_mask"]
+            )
+        else:
+            with torch.autocast(
+                device_type=self.device.type, dtype=self.model.dtype
+            ):  # or bfloat16
+                model_output = self.model(**inputs)
+            sentence_embeddings = self.pooling(model_output, inputs["attention_mask"])
         return sentence_embeddings
+
 
 # Usage example
 if __name__ == "__main__":
-    sentences = ['This is an example sentence', 'Each sentence is converted']
-    
+    sentences = ["This is an example sentence", "Each sentence is converted"]
+
     embedder = SentenceEmbedding()
     sentence_embeddings = embedder.get_sentence_embeddings(sentences)
-    
+
     print("Sentence embeddings:")
     print(sentence_embeddings)
     print(sentence_embeddings.shape)

@@ -5,7 +5,7 @@ from PIL import Image, ImageFile
 import os
 from typing import List, Tuple, Dict, Any, Union, Optional
 from torchvision import transforms as pth_transforms
-from transformers import ImageProcessingMixin
+from transformers import ImageProcessingMixin, AutoProcessor
 
 try:
     from transformers.image_processing_base import BaseBatchFeature
@@ -87,7 +87,10 @@ class ImageEmbedding(nn.Module):
         self.model_name = model_name
         self.output_hidden_states = output_hidden_states
 
-        if any(x in model_name for x in ["ibot", "mae", "dinov1", "ml-aim", "ijepa"]):
+        if any(
+            x in model_name
+            for x in ["ibot", "mae", "dinov1", "ml-aim", "ijepa", "franca"]
+        ):
             # load from local
             if "ibot" in model_name:
                 self.model = get_ibot_vit(model_name)
@@ -116,6 +119,23 @@ class ImageEmbedding(nn.Module):
                     self.model.embed_dim = 1536
                 else:
                     raise ValueError(f"Invalid model name: {model_name}")
+            elif "franca" in model_name:
+                # Map generic names to specific hub functions
+                if any(x in model_name.lower() for x in ["vitl", "large"]):
+                    variant = "franca_vitl14"
+                elif any(x in model_name.lower() for x in ["vitg", "giant"]):
+                    variant = "franca_vitg14"
+                else:
+                    raise ValueError(f"Invalid model name: {model_name}")
+
+                print(f"Loading {variant} from valeoai/Franca via torch.hub")
+                self.model = torch.hub.load(
+                    "valeoai/Franca",
+                    variant,
+                    weights="LAION",
+                    use_rasa_head=True,
+                    img_size=518,
+                )
             self.model = self.model.to(self.device).half()
             self.model.dtype = torch.float16
             self.image_processor = CustomImageProcessor()
@@ -141,6 +161,21 @@ class ImageEmbedding(nn.Module):
         elif any(x in model_name.lower() for x in ["aimv2"]):
             self.model = AutoModel.from_pretrained(
                 model_name, torch_dtype=torch.float16, trust_remote_code=True
+            )
+            self.image_processor = AutoImageProcessor.from_pretrained(model_name)
+        elif any(x in model_name.lower() for x in ["siglip"]):
+            self.model = AutoModel.from_pretrained(
+                model_name, torch_dtype=torch.float16
+            )
+            self.image_processor = AutoProcessor.from_pretrained(model_name)
+        elif any(x in model_name.lower() for x in ["dinov3", "franca"]):
+            print(f"Loading {model_name} with SDPA and Remote Code")
+            self.SDPA = True
+            self.model = AutoModel.from_pretrained(
+                model_name,
+                attn_implementation="sdpa",
+                torch_dtype=torch.bfloat16,
+                trust_remote_code=True,
             )
             self.image_processor = AutoImageProcessor.from_pretrained(model_name)
         else:
@@ -193,7 +228,9 @@ class ImageEmbedding(nn.Module):
         )
         with torch.autocast(device_type=self.device, dtype=self.model.dtype):
             with torch.no_grad():
-                return self.forward(inputs)
+                outputs = self.forward(inputs)
+
+        return outputs.to(torch.float16)
 
     def forward(
         self, inputs, patch_mode=False, attetion_type="qk", ignore_residual=False
@@ -258,6 +295,55 @@ class ImageEmbedding(nn.Module):
                 embedding = outputs.pooler_output
             elif any(x in self.model_name.lower() for x in ["aimv2"]):
                 embedding = torch.mean(outputs.last_hidden_state, dim=1)
+            elif any(x in self.model_name.lower() for x in ["siglip"]):
+                breakpoint()
+                embedding = outputs.pooler_output
+
+            elif any(x in self.model_name.lower() for x in ["dinov3", "franca"]):
+                # Retrieve the sequence (Batch, SeqLen, Hidden)
+                # DINOv3 normally returns a specific object, but we check safely
+                if hasattr(outputs, "last_hidden_state"):
+                    sequence_output = outputs.last_hidden_state
+                else:
+                    sequence_output = outputs[0]
+
+                # Identify tokens
+                # DINOv3 with registers: [CLS, Patch_1, ..., Patch_N, Reg_1, Reg_2, Reg_3, Reg_4]
+                # Standard 224px image = 196 patches.
+                # If sequence is 201, we have 4 registers.
+                seq_len = sequence_output.shape[1]
+                has_registers = (
+                    seq_len % 14 != 1
+                )  # Simple heuristic: 197 is standard (14x14+1). 201 is not.
+
+                cls_token = sequence_output[:, 0]
+
+                if (
+                    has_registers and seq_len > 5
+                ):  # Ensure we have enough tokens to slice
+                    # Slice off the last 4 tokens (registers)
+                    patch_tokens = sequence_output[:, 1:-4]
+                else:
+                    # Standard ViT slicing
+                    patch_tokens = sequence_output[:, 1:]
+
+                # Aggregation
+                if patch_mode:
+                    # Reconstruct sequence [CLS, Patches] without registers
+                    cls_token_unsqueezed = cls_token.unsqueeze(1)
+                    embedding = torch.cat([cls_token_unsqueezed, patch_tokens], dim=1)
+                else:
+                    if self.agg_mode == "patch":
+                        embedding = patch_tokens.mean(dim=1)
+                    elif self.agg_mode == "cls":
+                        embedding = cls_token
+                    elif self.agg_mode == "concat":
+                        embedding = torch.cat(
+                            [cls_token, patch_tokens.mean(dim=1)], dim=1
+                        )
+                    else:
+                        raise ValueError(f"Invalid agg_mode: {self.agg_mode}")
+
             else:
                 sequence_output = outputs[0]  # batch_size, sequence_length, hidden_size
 
