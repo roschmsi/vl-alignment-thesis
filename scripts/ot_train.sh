@@ -1,6 +1,6 @@
 #!/bin/bash
 
-epoch_num=20
+epoch_num=5
 lr=1e-4
 bs=32768
 d=1024
@@ -8,15 +8,26 @@ width_factor=1 # 8
 logit_scale=20
 logit_bias=-10
 
-supervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat.h5"
-unsupervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat.h5" # imagenet1k_concat.h5"
-supervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-unsupervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+# image_model="dinov3-vitl16-pretrain-lvd1689m"
+image_model="dinov2-large"
+# text_model="Qwen3-Embedding-8B"
+# text_model="llama-embed-nemotron-8b"
+text_model="NV-Embed-v2"
+
+supervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/$image_model/cc3m_concat.h5"
+unsupervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/$image_model/cc3m_concat.h5" # imagenet1k_concat.h5"
+supervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/$text_model/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
+unsupervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/$text_model/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+
+val_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/$image_model/cc3m_concat_validation.h5"
+val_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/$text_model/cc3m_raw_caption_validation.h5"
+
 # extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
 # image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_first100k.h5"
 # text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_first100k.h5"
-output_name="a_dinov2_nv2_cc3m_nsup=10k_nunsup=1M_semisupsail_a=1.0_semisupot_a=0.0001_deb_nn_memory"
-# semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_cca_lam=0.1"
+
+output_name="a_dinov2vitl_qwen_cc3m_nsup=10k_nunsup=100k_supsail_a=1.0_semisupot_a=0.0001_validation_deb_2"
+output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
@@ -25,11 +36,13 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --supervised_image_embedding $supervised_image_embedding \
     --unsupervised_text_embedding $unsupervised_text_embedding \
     --unsupervised_image_embedding $unsupervised_image_embedding \
+    --val_image_embedding $val_image_embedding \
+    --val_text_embedding $val_text_embedding \
     --val-frequency 1 \
     --dataset-type embedding \
     --seed 42 \
     --resume latest \
-    --save-frequency 1 \
+    --save-frequency 20 \
     --report-to wandb \
     --batch-size $bs \
     --lr $lr \
@@ -37,7 +50,7 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --workers 24 \
     --optimizer lion \
     --siglip \
-    --wd 1e-4 \
+    --wd 1e-5 \
     --target-dimension $d \
     --linear-type linear \
     --width-factor $width_factor \
@@ -46,23 +59,34 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --name $output_name \
     --logit_scale $logit_scale \
     --logit_bias $logit_bias \
-    --logs /lustre/groups/eml/projects/sroschmann/ot_logs \
+    --logs $output_dir \
     --hdf5 \
     --ot \
     --semisupervised \
     --n_supervised_pairs 10000 \
     --batch-size-supervised 10000 \
+    --n_unsupervised_image 100000 \
+    --n_unsupervised_text 100000 \
+    --anchor_lam_x 0.1 \
+    --anchor_lam_y 0.1 \
     --alpha_semisupervised_sail 1.0 \
     --alpha_semisupervised_ot 0.0001 \
     --epsilon_sinkhorn_shared 0.1 \
     --n_iters_sinkhorn_shared 20 \
     --epsilon_sinkhorn_anchor 0.01 \
     --n_iters_sinkhorn_anchor 100 \
-    --anchor_lam_x 0.1 \
-    --anchor_lam_y 0.1 \
-    --debugging \
-    --n_unsupervised_image 10000 \
-    --n_unsupervised_text 10000 \
+    --debugging
+
+    # --use_dustbin \
+    # --outlier_mass 0.2 \
+
+    # --alpha_semisupervised_ot 0.001 \
+    # --alpha_semisupervised_clusters 0.01 \
+    # --semisupervised_clusters 512 \
+    # --alpha_semisupervised_ot 0.01 \
+    # --n_unsupervised_image 100000 \
+    # --n_unsupervised_text 100000 \
+    # --debugging
 
     # --alpha_semisupervised_div 1.0 \
     # --divergence frobenius
@@ -132,3 +156,34 @@ if [ $? -ne 0 ]; then
         rm -rf ./logs/$output_name
     fi
 fi
+
+
+BEST_CKPT="${output_dir}/${output_name}/checkpoints/epoch_best.pt"
+
+
+if [ ! -f "$BEST_CKPT" ]; then
+    echo "Error: Could not find best checkpoint at $BEST_CKPT"
+    exit 1
+fi
+
+echo "########################################################"
+echo "Training complete. Starting evaluation on: $BEST_CKPT"
+
+
+# segmentation winoground MMVP
+for task in imagenetv1 COCO; do
+    echo "Task: $task"
+
+    python /home/eml/simon.roschmann/ot-alignment/eval.py \
+        --head-weights-path "$BEST_CKPT" \
+        --task "$task" \
+        --vision-model "facebook/dinov2-large" \
+        --text-model "nvidia/NV-Embed-v2" \
+        --dataset_root_dir "/lustre/groups/eml/projects/sroschmann/data" \
+        --batch_size 32 \
+        --agg_mode concat \
+        --linear-type linear \
+        --target-dimension 1024 \
+        --seg_task_config evaluation/seg_configs/cfg_voc20_SAIL.py \
+        --results_dir "${output_dir}/${output_name}/results"
+done
