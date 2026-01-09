@@ -32,6 +32,7 @@ class SemiSupervisedClipLoss(ClipLoss):
         unpaired_modality,  # image, text, both
         space,  # unimodal, bimodal
         pseudo_label_type,  # soft, hard, ot
+        epsilon=0.01,
         weight_unpaired_images=0.0,
         weight_unpaired_texts=0.0,
         local_loss=False,
@@ -97,7 +98,6 @@ class SemiSupervisedClipLoss(ClipLoss):
         texts_paired = F.normalize(texts_paired, dim=-1)
         images_unpaired = F.normalize(images_unpaired, dim=-1)
         texts_unpaired = F.normalize(texts_unpaired, dim=-1)
-
         f_images_paired = F.normalize(f_images_paired, dim=-1)
         f_texts_paired = F.normalize(f_texts_paired, dim=-1)
         f_images_unpaired = F.normalize(f_images_unpaired, dim=-1)
@@ -168,9 +168,9 @@ class SemiSupervisedClipLoss(ClipLoss):
                 )
                 pseudo_labels = plan @ F.one_hot(labels).float()
 
-                losses["caption_loss_unpaired_images"] = (
-                    soft_cross_entropy(logits_per_unpaired_image, pseudo_labels)
-                ) / 2
+                losses["caption_loss_unpaired_images"] = soft_cross_entropy(
+                    logits_per_unpaired_image, pseudo_labels
+                )
 
                 total_loss += (
                     self.weight_unpaired_images * losses["caption_loss_unpaired_images"]
@@ -199,9 +199,9 @@ class SemiSupervisedClipLoss(ClipLoss):
                 )
                 pseudo_labels = plan @ F.one_hot(labels).float()
 
-                losses["caption_loss_unpaired_texts"] = (
-                    soft_cross_entropy(logits_per_unpaired_text, pseudo_labels)
-                ) / 2
+                losses["caption_loss_unpaired_texts"] = soft_cross_entropy(
+                    logits_per_unpaired_text, pseudo_labels
+                )
 
                 total_loss += (
                     self.weight_unpaired_texts * losses["caption_loss_unpaired_texts"]

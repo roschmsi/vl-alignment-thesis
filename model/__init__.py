@@ -1,6 +1,8 @@
 from model.sclip import SemiSupervisedClipLoss
 from optimal_transport.matching import FullMatchingModel
 from .sail_model import AlignmentLayer, SAILModel, ShareLockAlignmentLayer
+from .vision_model import ImageEmbedding
+from .language_model import SentenceEmbedding
 from .loss import ClipLoss, SigLipLoss, SigLipLossWithNNPositives
 from typing import Union, Optional
 import torch
@@ -118,6 +120,7 @@ def create_loss(args):
             "alpha_semisupervised_ot_all": args.alpha_semisupervised_ot_all,
             "alpha_semisupervised_clusters": args.alpha_semisupervised_clusters,
             "alpha_semisupervised_sail": args.alpha_semisupervised_sail,
+            "alpha_semisupervised_monge_gap": args.alpha_semisupervised_monge_gap,
             "alpha_semisupervised_div": args.alpha_semisupervised_div,
             "alpha_semisupervised_double_softmax": args.alpha_semisupervised_double_softmax,
             "alpha_semisupervised_conditional_kl": args.alpha_semisupervised_conditional_kl,
@@ -128,9 +131,6 @@ def create_loss(args):
             "n_iters_sinkhorn_shared": args.n_iters_sinkhorn_shared,
             "epsilon_sinkhorn_anchor": args.epsilon_sinkhorn_anchor,
             "n_iters_sinkhorn_anchor": args.n_iters_sinkhorn_anchor,
-            # SAIL
-            "temperature_sail": args.temperature_sail,
-            "bias_sail": args.bias_sail,
             # softmax kl approaches
             "temperature_softmax": args.temperature_softmax,
             # anchors advanced
@@ -141,10 +141,6 @@ def create_loss(args):
             "anchor_rank_k_x": args.anchor_rank_k_x,
             "anchor_rank_k_y": args.anchor_rank_k_y,
             "anchor_relrenorm": args.anchor_relrenorm,
-            # unbalanced OT
-            "unbalanced": args.unbalanced,
-            "tau_x": args.tau_x,
-            "tau_y": args.tau_y,
         }
         return FullMatchingModel(loss_config)
 
