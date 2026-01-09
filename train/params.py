@@ -687,6 +687,11 @@ def parse_args(args):
         default=0.0,
     )
     parser.add_argument(
+        "--alpha_semisupervised_monge_gap",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--alpha_supervised_explicit",
         default=0,
         type=float,
@@ -1005,6 +1010,25 @@ def parse_args(args):
         type=float,
         default=0.0,
         help="Weight for unpaired texts in SCLIP loss.",
+    )
+    parser.add_argument(
+        "--val_text_embedding",
+        nargs="+",
+        default=None,
+        help="Path to file(s) with validation text embedding data.",
+    )
+    parser.add_argument(
+        "--val_image_embedding",
+        nargs="+",
+        default=None,
+        help="Path to file(s) with validation image embedding data.",
+    )
+    parser.add_argument(
+        "--unsupervised_index_mode",
+        type=str,
+        default="random",
+        choices=["aligned", "disjoint", "random"],
+        help="How to select indices for unsupervised data.",
     )
 
     args = parser.parse_args(args)

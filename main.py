@@ -357,6 +357,9 @@ def main(args):
 
     loss = create_loss(args)
 
+    monitor_metric = "mean_R@1"
+    best_metric = float("-inf")
+
     if args.ot:
         with torch.no_grad():
             bimodal_loader = data["train"].bimodal_loader
@@ -379,11 +382,12 @@ def main(args):
             cov_tracker_Y.update(Y_pairs)
 
             # add unpaired data
-            for batch_x, batch_y in zip(text_loader, image_loader):
-                batch_x = F.normalize(batch_x, p=2, dim=1)
-                batch_y = F.normalize(batch_y, p=2, dim=1)
-                cov_tracker_X.update(batch_x)
-                cov_tracker_Y.update(batch_y)
+            # TODO may not be beneficial for totally unpaired setting due to domain shift
+            # for batch_x, batch_y in zip(text_loader, image_loader):
+            #     batch_x = F.normalize(batch_x, p=2, dim=1)
+            #     batch_y = F.normalize(batch_y, p=2, dim=1)
+            #     cov_tracker_X.update(batch_x)
+            #     cov_tracker_Y.update(batch_y)
 
             # compute mean and covariance
             Sxx_total, mean_x_total = cov_tracker_X.compute()
@@ -406,12 +410,11 @@ def main(args):
             )
 
             if args.alpha_semisupervised_clusters > 0:
-                loss.init_cluster_anchors(
+                loss.init_clusters(
                     X_pairs,
                     Y_pairs,
                     n_clusters=args.semisupervised_clusters,
-                    min_cluster_size=args.min_cluster_size,
-                    outlier_fraction=args.outlier_fraction,
+                    use_cca=False,
                 )
 
     for epoch in range(start_epoch, args.epochs):
@@ -439,7 +442,38 @@ def main(args):
             args.val_frequency
             and ((epoch % args.val_frequency) == 0 or epoch == args.epochs)
         ):
-            evaluate(model, data, loss, epoch, args)
+            val_metrics = evaluate(model, data, loss, epoch, args)
+
+            if args.save_logs and val_metrics:
+                # Calculate Mean R@1
+                i2t_r1 = val_metrics.get("image_to_text_R@1", 0.0)
+                t2i_r1 = val_metrics.get("text_to_image_R@1", 0.0)
+                current_val = (i2t_r1 + t2i_r1) / 2.0
+
+                # Check if this is the new best
+                if current_val > best_metric:
+                    best_metric = current_val
+                    logging.info(
+                        f"New best {monitor_metric}: {best_metric:.4f} (I2T: {i2t_r1:.4f}, T2I: {t2i_r1:.4f}). Saving epoch_best.pt"
+                    )
+
+                    # Create checkpoint dict specifically for the best model
+                    best_checkpoint_dict = {
+                        "epoch": completed_epoch,
+                        "name": args.name,
+                        "state_dict": original_model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "best_metric": best_metric,
+                        "monitor_metric": monitor_metric,
+                    }
+                    if scaler is not None:
+                        best_checkpoint_dict["scaler"] = scaler.state_dict()
+
+                    torch.save(
+                        best_checkpoint_dict,
+                        os.path.join(args.checkpoint_path, "epoch_best.pt"),
+                    )
+
         # Saving checkpoints.
         if args.save_logs:
             checkpoint_dict = {

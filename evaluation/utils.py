@@ -52,7 +52,7 @@ def update_results_json(json_file, epoch, results):
 def extract_info_from_path(args):
     path = args.head_weights_path
     # 提取 epoch 后的数字
-    epoch_pattern = r"epoch_(\d+)\.pt"
+    epoch_pattern = r"epoch_([a-zA-Z0-9]+)\.pt"  # r"epoch_(\d+)\.pt"
     epoch_match = re.search(epoch_pattern, path)
     epoch_number = epoch_match.group(1) if epoch_match else None
 

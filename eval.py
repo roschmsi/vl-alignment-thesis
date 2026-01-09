@@ -164,7 +164,6 @@ def main(args):
     output_path = os.path.join(
         args.results_dir,
         args.task,
-        model_prefix,
         f"{training_info_str}.json",
     )
 

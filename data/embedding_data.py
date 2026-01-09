@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -8,16 +9,16 @@ import bisect
 
 
 class H5Base(Dataset):
-    def __init__(self, paths, h5_key, indices):
+    def __init__(self, paths, h5_key, indices, chunk_size=500_000):
         super().__init__()
         self.indices = np.array(indices)
 
-        total_file_length = 0
         file_boundaries = []
+        total_file_length = 0
         feature_dim = None
-        dtype = None
+        dtype = torch.float16
 
-        print(f"Scanning {len(paths)} files for metadata...")
+        print(f"Scanning metadata for {len(paths)} files...")
         for path in paths:
             try:
                 with h5py.File(path, "r") as f:
@@ -27,7 +28,6 @@ class H5Base(Dataset):
                     if feature_dim is None:
                         shape = dset.shape
                         feature_dim = shape[1] if len(shape) > 1 else 1
-                        dtype = torch.float32
 
                     start = total_file_length
                     end = total_file_length + length
@@ -35,64 +35,65 @@ class H5Base(Dataset):
                     total_file_length += length
             except Exception as e:
                 print(f"Error scanning {path}: {e}")
+                raise
 
-        # preallocate memory
-        print(f"Allocating memory for {len(self.indices)} samples (dim={feature_dim})")
+        print(
+            f"Allocating memory for {len(self.indices)} samples (dim={feature_dim})..."
+        )
         self.data = torch.zeros((len(self.indices), feature_dim), dtype=dtype)
 
-        # load data from files in slices
-        print(f"Loading filtered data from {len(paths)} files")
-
-        indices = self.indices
+        # load full data in chunks, index in RAM
+        print(f"Loading data from {len(paths)} files into RAM...")
 
         for path, file_start, file_end in file_boundaries:
-            # Which requested global indices fall into this file
-            mask = (indices >= file_start) & (indices < file_end)
-            if not np.any(mask):
+            # Check if any of our requested indices are in this file at all
+            # (Global Index) >= (File Start)  AND  (Global Index) < (File End)
+            file_mask = (self.indices >= file_start) & (self.indices < file_end)
+
+            if not np.any(file_mask):
                 continue
 
-            # Global indices we need from this file
-            file_global = indices[mask]
-            dest_slots = np.where(mask)[0]
-            file_local = file_global - file_start  # per-file local indices
-
-            # Sort by local index so we can read contiguous ranges
-            order = np.argsort(file_local)
-            file_local_sorted = file_local[order]
-            dest_sorted = dest_slots[order]
-
-            diffs = np.diff(file_local_sorted)
-            run_starts = np.concatenate(([0], np.where(diffs != 1)[0] + 1))
-            run_ends = np.concatenate((run_starts[1:], [len(file_local_sorted)]))
+            file_len = file_end - file_start
+            print(f"Processing file: {os.path.basename(path)}")
 
             with h5py.File(path, "r") as f:
                 dset = f[h5_key]
 
-                for rs, re in tqdm(zip(run_starts, run_ends)):
-                    # Local indices for this run
-                    run_local = file_local_sorted[rs:re]
-                    run_dest = dest_sorted[rs:re]
+                # Iterate over the file in chunks of 'chunk_size'
+                # tqdm handles the progress bar for the chunks
+                for chunk_start in tqdm(
+                    range(0, file_len, chunk_size), desc="Loading chunks"
+                ):
+                    chunk_end = min(chunk_start + chunk_size, file_len)
 
-                    start_idx = int(run_local[0])
-                    end_idx = int(run_local[-1]) + 1  # slice end is exclusive
+                    # Calculate the GLOBAL index range for this specific chunk
+                    global_chunk_start = file_start + chunk_start
+                    global_chunk_end = file_start + chunk_end
 
-                    # ONE contiguous read from disk
-                    chunk_np = dset[
-                        start_idx:end_idx
-                    ]  # shape: (end_idx-start_idx, feature_dim)
+                    # Find which requested indices fall into this specific chunk
+                    chunk_mask = (self.indices >= global_chunk_start) & (
+                        self.indices < global_chunk_end
+                    )
 
-                    # If dtype already matches, avoid unnecessary conversion
-                    if dtype == torch.float32 and np.issubdtype(
-                        chunk_np.dtype, np.floating
-                    ):
-                        chunk_torch = torch.from_numpy(chunk_np).to(dtype=dtype)
-                    else:
-                        # Fallback (may incur a copy)
-                        chunk_torch = torch.as_tensor(chunk_np, dtype=dtype)
+                    if not np.any(chunk_mask):
+                        continue
 
-                    # run_local is consecutive, so chunk_np is already in correct order
-                    # The run_dest is in the same order as run_local, so we can assign directly
-                    self.data[run_dest] = chunk_torch
+                    # 1. Identify where in self.data these rows need to go
+                    dest_slots = np.where(chunk_mask)[0]
+
+                    # 2. Identify which rows in the CURRENT CHUNK we need
+                    # (Global Index) - (Global Chunk Start) = (Index relative to this chunk 0..500k)
+                    chunk_local_indices = self.indices[chunk_mask] - global_chunk_start
+
+                    # 3. Read ONLY this chunk into RAM (e.g. 500k rows)
+                    # This is the heavy I/O step, but it's bounded by chunk_size
+                    chunk_data = dset[chunk_start:chunk_end]
+
+                    # 4. specific indexing in RAM (fast)
+                    selected_rows = chunk_data[chunk_local_indices]
+
+                    # 5. Store in main tensor
+                    self.data[dest_slots] = torch.from_numpy(selected_rows).to(dtype)
 
         print(f"Successfully loaded {len(self.data)} samples.")
 

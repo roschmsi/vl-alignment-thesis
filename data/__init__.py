@@ -40,6 +40,11 @@ class SemiSupervisedDataInfo:
     data_info: dict = None
 
 
+@dataclass
+class DataInfo:
+    dataloader: DataLoader
+
+
 def get_embedding_dataset(
     supervised_text_embedding,
     supervised_image_embedding,
@@ -53,7 +58,9 @@ def get_embedding_dataset(
     n_unsupervised_text=None,
     n_unsupervised_image=None,
     batch_size_supervised=None,
+    unsupervised_index_mode="random",  # "aligned", "disjoint", "random"
     debugging=False,
+    # NNCLR parameters
     text_nn_positives=0,
     image_nn_positives=0,
     text_neighbors_path=None,
@@ -61,93 +68,134 @@ def get_embedding_dataset(
     text_topk=0,
     image_topk=0,
 ):
-    # Determine supervised indices (anchors)
-    if debugging:
-        total_sup_samples = 100000
-    else:
-        # Assumes supervised text and image files are parallel and have same length
-        total_sup_samples = get_total_h5_length(
-            supervised_text_embedding, key="embeddings"
-        )
+    # Assert supervised text and image files are parallel and have same length
+    len_text = get_total_h5_length(supervised_text_embedding, key="embeddings")
+    len_image = get_total_h5_length(supervised_image_embedding, key="embeddings")
 
-    # Generate a master permutation for the supervised files
-    # This ensures text[i] and image[i] remain aligned
+    assert len_text == len_image, (
+        f"ERROR: Supervised datasets must have the same length\n"
+        f"Text file: {len_text} samples\n"
+        f"Image file: {len_image} samples\n"
+    )
+
+    total_sup_samples = len_text
+
+    # Reduce set of indices for debugging
+    if debugging:
+        n_supervised_pairs = 10000
+        batch_size_supervised = 10000
+        n_unsupervised_image = 100000
+        n_unsupervised_text = 100000
+        total_sup_samples = 110000
+
+    # Generate master permutation for the supervised files
+    # Ensure text[i] and image[i] remain aligned
     sup_permutation = np.random.permutation(total_sup_samples)
 
     # Determine cut-off for supervised pairs
-    n_sup = n_supervised_pairs if n_supervised_pairs is not None else total_sup_samples
-    n_sup = min(n_sup, total_sup_samples)
+    if n_supervised_pairs is not None:
+        # Validate the specific user input
+        assert n_supervised_pairs <= total_sup_samples, (
+            f"Requested more supervised pairs ({n_supervised_pairs}) "
+            f"than available ({total_sup_samples})."
+        )
+        n_sup = n_supervised_pairs
+    else:
+        # Default use everything
+        n_sup = total_sup_samples
 
     sup_indices = sup_permutation[:n_sup]
 
-    # The remaining indices in the supervised file (available if we need to split)
+    # The remaining indices in the supervised file (may be used as unsupervised samples)
     remaining_sup_indices = sup_permutation[n_sup:]
 
-    # Determined unsupervised text indices
-    unsup_text_indices = []
+    # Check per modality if unsupervised source is shared or distinct
+    is_shared_text = unsupervised_text_embedding == supervised_text_embedding
+    is_shared_image = unsupervised_image_embedding == supervised_image_embedding
 
-    # Check if we should split the supervised file or load a new one
-    if unsupervised_text_embedding == supervised_text_embedding:
-        print("Text Source: Shared (Splitting supervised file)")
-        # Use the remainder of the supervised permutation
-        n_ut = (
-            n_unsupervised_text
-            if n_unsupervised_text is not None
-            else len(remaining_sup_indices)
+    # Create pool of text indices
+    if is_shared_text:
+        # Take from the remaining supervised indices
+        len_ut_source = len(remaining_sup_indices)
+        pool_text = remaining_sup_indices
+    else:
+        # Take from a new file
+        len_ut_source = get_total_h5_length(
+            unsupervised_text_embedding, key="embeddings"
         )
-        n_ut = min(n_ut, len(remaining_sup_indices))
-        unsup_text_indices = remaining_sup_indices[:n_ut]
+        pool_text = np.random.permutation(len_ut_source)
 
-    elif unsupervised_text_embedding:
-        print("Text Source: Distinct (Loading separate file)")
-        if debugging:
-            total_ut = 100000
-        else:
-            total_ut = get_total_h5_length(
-                unsupervised_text_embedding, key="embeddings"
-            )
-
-        # New independent permutation
-        perm_ut = np.random.permutation(total_ut)
-        n_ut = n_unsupervised_text if n_unsupervised_text is not None else total_ut
-        n_ut = min(n_ut, total_ut)
-        unsup_text_indices = perm_ut[:n_ut]
-
-    # Determine unsupervised image indices
-    unsup_image_indices = []
-
-    # Check if we should split the supervised file or load a new one
-    if unsupervised_image_embedding == supervised_image_embedding:
-        print("Image Source: Shared (Splitting supervised file)")
-        # Use the remainder of the supervised permutation
-        # Note: We use the same 'remaining_sup_indices' pool.
-        # Ideally, unsup text and unsup image from the *same* split file are not paired,
-        # so picking the same indices from the remainder is fine (they are just unpaired samples).
-        n_ui = (
-            n_unsupervised_image
-            if n_unsupervised_image is not None
-            else len(remaining_sup_indices)
+    # Create pool of image indices
+    if is_shared_image:
+        # Take from the remaining supervised indices
+        len_ui_source = len(remaining_sup_indices)
+        pool_image = remaining_sup_indices
+    else:
+        # Take from a new file
+        len_ui_source = get_total_h5_length(
+            unsupervised_image_embedding, key="embeddings"
         )
-        n_ui = min(n_ui, len(remaining_sup_indices))
-        unsup_image_indices = remaining_sup_indices[:n_ui]
-    elif unsupervised_image_embedding:
-        print("Image Source: Distinct (Loading separate file)")
-        if debugging:
-            total_ui = 100000
-        else:
-            total_ui = get_total_h5_length(
-                unsupervised_image_embedding, key="embeddings"
-            )
+        pool_image = np.random.permutation(len_ui_source)
 
-        # New independent permutation
-        perm_ui = np.random.permutation(total_ui)
-        n_ui = n_unsupervised_image if n_unsupervised_image is not None else total_ui
-        n_ui = min(n_ui, total_ui)
-        unsup_image_indices = perm_ui[:n_ui]
+    # Determine if unsupervised sources are compatible (same dataset)
+    unsupervised_are_compatible = False
 
-    print(f"Total Supervised Pairs: {len(sup_indices)}")
-    print(f"Total Unsupervised Texts: {len(unsup_text_indices)}")
-    print(f"Total Unsupervised Images: {len(unsup_image_indices)}")
+    if is_shared_text and is_shared_image:
+        unsupervised_are_compatible = True
+    elif (not is_shared_text) and (not is_shared_image):
+        # Extract base name to check if they are the same dataset (e.g. "cc12m_concat.h5" -> "cc12m")
+        name_ut = str(unsupervised_text_embedding).split("/")[-1].split("_")[0]
+        name_ui = str(unsupervised_image_embedding).split("/")[-1].split("_")[0]
+        if name_ut == name_ui and len_ut_source == len_ui_source:
+            unsupervised_are_compatible = True
+
+    print(
+        f"Unsupervised Sources: Text={'Shared' if is_shared_text else 'Distinct'}, Image={'Shared' if is_shared_image else 'Distinct'}"
+    )
+    print(f"Compatibility of unsupervised sources: {unsupervised_are_compatible}")
+
+    if unsupervised_are_compatible:
+        print(f"Applying mode: {unsupervised_index_mode}")
+
+        if unsupervised_index_mode == "aligned":
+            # Force indices to match exactly
+            pool_image = pool_text
+
+        elif unsupervised_index_mode == "disjoint":
+            # Split pool of indices into two non-overlapping halves
+            limit = len(pool_text) // 2
+            pool_text = pool_text[:limit]
+            pool_image = pool_image[limit:]
+
+        elif unsupervised_index_mode == "random":
+            # Randomly permute one of the two modalities
+            pool_image = np.random.permutation(pool_image)
+
+    else:
+        print(
+            "Unsupervised text and image sources are different. Indices are selected independently."
+        )
+        pass
+
+    # final selection of unsupervised indices based on number
+    n_ut = n_unsupervised_text if n_unsupervised_text is not None else len(pool_text)
+    n_ut = min(n_ut, len(pool_text))
+    unsup_text_indices = pool_text[:n_ut]
+
+    n_ui = n_unsupervised_image if n_unsupervised_image is not None else len(pool_image)
+    n_ui = min(n_ui, len(pool_image))
+
+    # resolve case where n_unsupervised_text != n_unsupervised_image but aligned indices are required
+    if unsupervised_index_mode == "aligned" and unsupervised_are_compatible:
+        limit = min(n_ut, n_ui)
+        unsup_text_indices = pool_text[:limit]
+        unsup_image_indices = pool_image[:limit]
+    else:
+        unsup_image_indices = pool_image[:n_ui]
+
+    print(
+        f"Final Unsupervised Counts: {len(unsup_text_indices)} Text, {len(unsup_image_indices)} Image"
+    )
 
     if semisupervised:
         # Supervised image-text dataset (paired)
@@ -162,14 +210,14 @@ def get_embedding_dataset(
             bimodal_dataset,
             shuffle=True,
             batch_size=batch_size_supervised,
-            num_workers=(workers // 3),
+            num_workers=0,  # (workers // 3),
             pin_memory=True,
             drop_last=False,
         )
 
         # Unsupervised image dataset
         image_loader = None
-        vis_dim = 2048
+        vis_dim = bimodal_dataset[0][1].shape[0]
         if len(unsup_image_indices) > 0:
             image_dataset = H5UnimodalDataset(
                 paths=unsupervised_image_embedding,
@@ -182,7 +230,7 @@ def get_embedding_dataset(
                 batch_size=min(
                     batch_size - batch_size_supervised, n_unsupervised_image
                 ),
-                num_workers=(workers // 3),
+                num_workers=0,  # (workers // 3),
                 pin_memory=True,
                 drop_last=True,
             )
@@ -193,7 +241,7 @@ def get_embedding_dataset(
 
         # Unsupervised text dataset
         text_loader = None
-        txt_dim = 4096
+        txt_dim = bimodal_dataset[0][0].shape[0]
         if len(unsup_text_indices) > 0:
             text_dataset = H5UnimodalDataset(
                 paths=unsupervised_text_embedding,
@@ -204,7 +252,7 @@ def get_embedding_dataset(
                 text_dataset,
                 shuffle=True,
                 batch_size=min(batch_size - batch_size_supervised, n_unsupervised_text),
-                num_workers=(workers // 3),
+                num_workers=0,  # (workers // 3),
                 pin_memory=True,
                 drop_last=True,
             )
@@ -255,7 +303,7 @@ def get_embedding_dataset(
             bimodal_dataset,
             shuffle=True,
             batch_size=min(batch_size, n_supervised_pairs),
-            num_workers=workers,
+            num_workers=0,  # workers,
             pin_memory=True,
             drop_last=True,
         )
@@ -263,12 +311,15 @@ def get_embedding_dataset(
         bimodal_loader.num_samples = len(bimodal_dataset)
         bimodal_loader.num_batches = len(bimodal_loader)
 
+        vis_dim = bimodal_dataset[0][1].shape[0]
+        txt_dim = bimodal_dataset[0][0].shape[0]
+
         return SemiSupervisedDataInfo(
             data_info={
                 "num_samples_paired": len(bimodal_dataset),
                 "num_samples_unpaired": 0,
-                "visual_dim": 2048,
-                "text_dim": 4096,
+                "visual_dim": vis_dim,
+                "text_dim": txt_dim,
             },
             bimodal_loader=bimodal_loader,
             image_loader=None,
@@ -276,6 +327,58 @@ def get_embedding_dataset(
         )
     else:
         raise ValueError("Must specify either supervised or semisupervised mode.")
+
+
+def make_bimodal_validation_loader(
+    text_paths,
+    image_paths,
+    batch_size=2048,
+    num_workers=8,
+    shuffle=False,
+    drop_last=False,
+    pin_memory=True,
+    h5_key="embeddings",
+):
+    # normalize to list
+    if isinstance(text_paths, str):
+        text_paths = [text_paths]
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
+
+    # total length (must match)
+    def total_len(paths):
+        n = 0
+        for p in paths:
+            with h5py.File(p, "r") as f:
+                n += f[h5_key].shape[0]
+        return n
+
+    nt = total_len(text_paths)
+    ni = total_len(image_paths)
+    if nt != ni:
+        raise ValueError(f"Length mismatch: text={nt}, image={ni}")
+
+    indices = np.arange(nt, dtype=np.int64)
+
+    ds = H5BimodalDataset(
+        text_paths=text_paths,
+        image_paths=image_paths,
+        indices=indices,
+        h5_key=h5_key,
+    )
+
+    loader = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=0,  # num_workers,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
+    )
+    loader.num_samples = len(ds)
+    loader.num_batches = len(loader)
+
+    return DataInfo(dataloader=loader)
 
 
 def get_data(args, epoch=0):
@@ -295,6 +398,7 @@ def get_data(args, epoch=0):
             n_unsupervised_image=args.n_unsupervised_image,
             n_unsupervised_text=args.n_unsupervised_text,
             batch_size_supervised=args.batch_size_supervised,
+            unsupervised_index_mode=args.unsupervised_index_mode,
             debugging=args.debugging,
             text_nn_positives=args.text_nn_positives,
             image_nn_positives=args.image_nn_positives,
@@ -302,6 +406,16 @@ def get_data(args, epoch=0):
             image_neighbors_path=args.image_neighbors_path,
             text_topk=args.text_topk,
             image_topk=args.image_topk,
+        )
+        data["val"] = make_bimodal_validation_loader(
+            text_paths=args.val_text_embedding,
+            image_paths=args.val_image_embedding,
+            batch_size=2048,
+            num_workers=args.workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=True,
+            h5_key="embeddings",
         )
     else:
         raise ValueError("Supervised text/image embedding paths are required.")
