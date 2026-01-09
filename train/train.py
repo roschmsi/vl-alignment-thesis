@@ -137,6 +137,10 @@ def train_one_epoch_semisupervised(
             model_out_paired = model(images_paired, texts_paired)
             model_out_unpaired = model(images_unpaired, texts_unpaired)
 
+            # log logit_scale and logit_bias
+            logit_scale = model_out_paired["logit_scale"]
+            logit_bias = model_out_paired["logit_bias"]
+
             if args.sclip:
                 logs = loss(
                     texts_paired=texts_paired,
@@ -147,7 +151,7 @@ def train_one_epoch_semisupervised(
                     images_unpaired=images_unpaired,
                     f_texts_unpaired=model_out_unpaired["text_features"],
                     f_images_unpaired=model_out_unpaired["image_features"],
-                    logit_scale=model_out_unpaired["logit_scale"],
+                    logit_scale=logit_scale,
                 )
 
                 # logs = loss(
@@ -160,7 +164,6 @@ def train_one_epoch_semisupervised(
 
                 total_loss = logs["total_loss"]
             else:
-
                 total_loss, logs = loss(
                     X=texts_unpaired,
                     Y=images_unpaired,
@@ -170,6 +173,8 @@ def train_one_epoch_semisupervised(
                     fY=model_out_unpaired["image_features"],
                     fX_pairs=model_out_paired["text_features"],
                     fY_pairs=model_out_paired["image_features"],
+                    logit_scale=logit_scale,
+                    logit_bias=logit_bias,
                 )
 
         backward(total_loss, scaler)
@@ -215,14 +220,18 @@ def train_one_epoch_semisupervised(
                 ]
             )
             logging.info(
-                f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
-                f"LR: {optimizer.param_groups[0]['lr']:5f} " + loss_log
+                f"Train epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
+                f"LR: {optimizer.param_groups[0]['lr']:5f} "
+                f"Logit Scale: {logit_scale.item():.3f} "
+                f"Logit Bias: {logit_bias.item():.3f} " + loss_log
             )
 
             # Save train loss / etc. Using non avg meter values as loggers have their own smoothing
             log_data = {
                 "data_time": data_time_m.val,
                 "lr": optimizer.param_groups[0]["lr"],
+                "logit_scale": logit_scale.item(),
+                "logit_bias": logit_bias.item(),
             }
             log_data.update({name: val.val for name, val in losses_m.items()})
 
@@ -293,8 +302,8 @@ def train_one_epoch_supervised(
                     image_features=model_out_paired["image_features"],
                     text_nn_features=model_out_positives["text_features"],
                     image_nn_features=model_out_positives["image_features"],
-                    logit_scale=20,
-                    logit_bias=-10,
+                    logit_scale=model_out_paired["logit_scale"],
+                    logit_bias=model_out_paired["logit_bias"],
                 )
                 total_loss = logs["total_loss"]
             elif args.alpha_supervised_implicit == 1.0:
@@ -311,6 +320,8 @@ def train_one_epoch_supervised(
                 total_loss = loss.loss_supervised_sail(
                     model_out_paired["text_features"],
                     model_out_paired["image_features"],
+                    logit_scale=model_out_paired["logit_scale"],
+                    logit_bias=model_out_paired["logit_bias"],
                 )
                 logs = {"loss_supervised_sail": total_loss.item()}
             else:
@@ -566,9 +577,9 @@ def evaluate(model, data, loss, epoch, args):
                     all_text_features.append(model_out["text_features"])
                     # features are accumulated in CPU tensors, otherwise GPU memory exhausted quickly
                     # however, system RAM is easily exceeded and compute time becomes problematic
-                    total_loss = loss(**model_out, output_dict=True)["contrastive_loss"]
+                    # total_loss = loss(**model_out, output_dict=True)["contrastive_loss"]
 
-                cumulative_loss += total_loss * batch_size * batch_size
+                # cumulative_loss += total_loss * batch_size * batch_size
                 num_samples += batch_size * batch_size
 
             if is_master(args) and (i % 100) == 0:
@@ -583,11 +594,12 @@ def evaluate(model, data, loss, epoch, args):
                     logit_scale=model_out["logit_scale"],
                     logit_bias=model_out["logit_bias"],
                 )
+
             loss = cumulative_loss / num_samples
             metrics.update(
                 {
                     **val_metrics,
-                    "val_loss": loss.item(),
+                    # "val_loss": loss.item(),
                     "epoch": epoch,
                     "num_samples": num_samples,
                 }
