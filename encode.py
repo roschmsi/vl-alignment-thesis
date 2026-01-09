@@ -141,6 +141,12 @@ def parse_args():
         default=0,
         help="If set (0-4), extracts only the n-th caption per image. If None, extracts all.",
     )
+    parser.add_argument(
+        "--split",
+        type=str,
+        choices=["train", "validation"],
+        default="train",
+    )
     return parser.parse_args()
 
 
@@ -311,6 +317,9 @@ def encode_text(args, data_loader, start_index):
         else:
             file_suffix = args.source_caption
 
+        if args.data == "cc3m" and args.split == "validation":
+            file_suffix = f"{file_suffix}_validation"
+
         hdf5_path = os.path.join(output_dir, f"{args.data}_{file_suffix}.h5")
 
     model = SentenceEmbedding(
@@ -344,8 +353,12 @@ def encode_image(args, data_loader, start_index):
     )
     print(f"Output directory: {output_dir}")
 
-    hdf5_path = os.path.join(output_dir, f"{args.data}_{args.agg_mode}.h5")
+    file_suffix = f"{args.data}_{args.agg_mode}"
 
+    if args.data == "cc3m" and args.split == "validation":
+        file_suffix = f"{file_suffix}_validation"
+
+    hdf5_path = os.path.join(output_dir, f"{file_suffix}.h5")
     # Instantiate the model from your custom class
     model = ImageEmbedding(
         args.vision_model_name,
@@ -378,11 +391,12 @@ def load_webdataset(data_path, source_caption, domain):
     logging.info(f"Setting up webdataset from path: {data_path}")
 
     dataset = wds.WebDataset(data_path, shardshuffle=False, resampled=False)
-    dataset = dataset.decode("pil")
 
     if domain == "image":
+        dataset = dataset.decode("pil")
 
         def image_extractor(sample):
+            print(sample.keys())
             if "jpg" in sample.keys():
                 return sample["jpg"]
             elif "jpeg" in sample.keys():
@@ -395,7 +409,13 @@ def load_webdataset(data_path, source_caption, domain):
     elif domain == "text":
 
         def text_extractor(sample):
-            return sample["json"][source_caption]
+            # print(sample.keys())
+            # print(sample["json"].keys())
+            if "json" in sample.keys():
+                return sample["json"][source_caption]
+            elif "txt" in sample.keys():
+                # print(sample["txt"].decode("utf-8"))
+                return sample["txt"].decode("utf-8")
 
         dataset = dataset.map(text_extractor, handler=wds.warn_and_continue)
 
@@ -468,8 +488,14 @@ def main():
     # --------------------------------------------------------
     if args.data in ["cc3m", "cc12m"]:
         if args.data == "cc3m":
-            base_path = f"{args.input_dir}/cc3m-train-"
-            max_shard_index = 282
+            if args.split == "train":
+                base_path = f"{args.input_dir}/cc3m-train-"
+                max_shard_index = 282
+            elif args.split == "validation":
+                base_path = f"{args.input_dir}/cc3m-validation-"
+                max_shard_index = 15
+            else:
+                raise ValueError("Invalid split for cc3m. Use 'train' or 'validation'.")
         else:  # cc12m
             base_path = f"{args.input_dir}/cc12m-train-"
             max_shard_index = 1001
