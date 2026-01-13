@@ -41,7 +41,7 @@ class AlignmentLayer(nn.Module):
         logit_scale: float = 10.0,
         logit_bias: float = -10.0,
         only_vision: bool = False,
-        width_factor: int = 8,
+        width_factor: float = 8.0,
         hidden_states=False,
         reconstruction=False,
         reconstruction_type="linear",
