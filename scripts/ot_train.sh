@@ -1,6 +1,6 @@
 #!/bin/bash
 
-epoch_num=5
+epoch_num=20
 lr=1e-4
 bs=32768
 d=1024
@@ -8,26 +8,30 @@ width_factor=1 # 8
 logit_scale=20
 logit_bias=-10
 
-# image_model="dinov3-vitl16-pretrain-lvd1689m"
-image_model="dinov2-large"
-# text_model="Qwen3-Embedding-8B"
-# text_model="llama-embed-nemotron-8b"
-text_model="NV-Embed-v2"
+# image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
+image_model="facebook/dinov2-large"
+# text_model="Qwen/Qwen3-Embedding-8B"
+# text_model="nvidia/llama-embed-nemotron-8b"
+text_model="nvidia/NV-Embed-v2"
 
-supervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/$image_model/cc3m_concat.h5"
-unsupervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/$image_model/cc3m_concat.h5" # imagenet1k_concat.h5"
-supervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/$text_model/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-unsupervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/$text_model/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data"
 
-val_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/$image_model/cc3m_concat_validation.h5"
-val_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/$text_model/cc3m_raw_caption_validation.h5"
+supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
+unsupervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
+supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
+unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+
+val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
+val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
 
 # extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
 # image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_first100k.h5"
 # text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_first100k.h5"
 
-output_name="a_dinov2vitl_qwen_cc3m_nsup=10k_nunsup=100k_supsail_a=1.0_semisupot_a=0.0001_validation_deb_2"
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
+
+current_time=$(date +%Y-%m-%d_%H-%M-%S)
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_no_tol_cc3m_sh=0.1_10_an=0.01_100" # topk_x=256_topk_y=128"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
@@ -36,6 +40,7 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --supervised_image_embedding $supervised_image_embedding \
     --unsupervised_text_embedding $unsupervised_text_embedding \
     --unsupervised_image_embedding $unsupervised_image_embedding \
+    --unsupervised_index_mode disjoint \
     --val_image_embedding $val_image_embedding \
     --val_text_embedding $val_text_embedding \
     --val-frequency 1 \
@@ -65,86 +70,27 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --semisupervised \
     --n_supervised_pairs 10000 \
     --batch-size-supervised 10000 \
-    --n_unsupervised_image 100000 \
-    --n_unsupervised_text 100000 \
-    --anchor_lam_x 0.1 \
-    --anchor_lam_y 0.1 \
+    --n_unsupervised_image 1000000 \
+    --n_unsupervised_text 1000000 \
+    --cca_lam_x 0.1 \
+    --cca_lam_y 0.1 \
+    --eig_eps 1e-6 \
     --alpha_semisupervised_sail 1.0 \
     --alpha_semisupervised_ot 0.0001 \
     --epsilon_sinkhorn_shared 0.1 \
-    --n_iters_sinkhorn_shared 20 \
+    --n_iters_sinkhorn_shared 10 \
     --epsilon_sinkhorn_anchor 0.01 \
     --n_iters_sinkhorn_anchor 100 \
     --debugging
+    # --optimized_matching \
 
-    # --use_dustbin \
-    # --outlier_mass 0.2 \
+    # --multi_text_mode
+    # --cca_topk_x 512 \
+    # --cca_topk_y 512
 
-    # --alpha_semisupervised_ot 0.001 \
-    # --alpha_semisupervised_clusters 0.01 \
-    # --semisupervised_clusters 512 \
-    # --alpha_semisupervised_ot 0.01 \
-    # --n_unsupervised_image 100000 \
-    # --n_unsupervised_text 100000 \
+    # --optimized_matching \
+    # --match_all
     # --debugging
-
-    # --alpha_semisupervised_div 1.0 \
-    # --divergence frobenius
-
-    # --alpha_semisupervised_sail 1.0 \
-    # --alpha_semisupervised_double_softmax 0.00001 \
-    # --temperature_softmax 0.1 \
-
-    # --semisupervised \
-    # --n_supervised_pairs 10000 \
-    # --batch-size-supervised 10000 \
-    # --alpha_semisupervised_sail 1.0
-    
-    # --debugging
-    # --n_unsupervised_image \
-    # --n_unsupervised_text \
-    
-    # --debugging
-    # --anchor_relrenorm
-    # --alpha_semisupervised_clusters 0.0001 \
-    # --semisupervised_clusters 512 \
-    # --outlier_fraction 0.01 \
-    # --min_cluster_size 5 \
-
-    # --alpha_semisupervised_clusters 0.0001 \
-    # --semisupervised_clusters 256 \
-    # --outlier_fraction 0.05 \
-    # --min_cluster_size 5 \
-
-    # --debugging
-    # --unbalanced \
-    # --tau_x 2.0 \
-    # --tau_y 5.0
-    # --anchor_rank_k_x 256 \
-    # --anchor_rank_k_y 512
-
-    # --alpha_semisupervised_clusters 0.0001 \
-    # --semisupervised_clusters 256 \
-    # --outlier_fraction 0.05 \
-    # --min_cluster_size 5 \
-    # --alpha_semisupervised_ot 0.0001 \
-    # --supervised \
-    # --alpha_supervised_sail 1.0
-    # --n_iters_sinkhorn_shared 5 \
-    # --epsilon_sinkhorn_shared 0.02
-    # --alpha_supervised_implicit 1.0 \
-    # --alpha_semisupervised_ot 0.0 \
-    # --n_supervised_pairs 10000 \
-    # --batch-size-supervised 10000 \
-    # --n_iters_sinkhorn_anchor 20 \
-    # --sinkhorn \
-    # --epsilon 0.01 \
-    # --n_iters_sinkhorn 5 \
-    # --alpha_supervised_explicit 0 \
-    # --alpha_supervised_implicit 1 \
-    # --alpha_marginal 0 \
-    # --alpha_unsupervised 0
-    # --extra-text-embedding-list $extra_text_embedding_list \
 
 if [ $? -ne 0 ]; then
     echo "Training failed. Checking for checkpoints..."

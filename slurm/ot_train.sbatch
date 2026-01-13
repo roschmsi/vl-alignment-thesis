@@ -32,13 +32,15 @@ image_model="facebook/dinov2-large"
 # text_model="nvidia/llama-embed-nemotron-8b"
 text_model="nvidia/NV-Embed-v2"
 
-supervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/${image_model##*/}/cc3m_concat.h5"
-unsupervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
-supervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-unsupervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data"
 
-val_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
-val_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
+supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
+unsupervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
+supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
+unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+
+val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
+val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
 
 # extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
 # image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_first100k.h5"
@@ -47,7 +49,7 @@ val_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_d
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 current_time=$(date +%Y-%m-%d_%H-%M-%S)
-output_name="${current_time}_${image_model##*/}_${text_model##*/}"
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_opt_sh=0.05_100_an=0.01_100_all_onlyot" # topk_x=256_topk_y=128"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
@@ -88,14 +90,31 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --batch-size-supervised 10000 \
     --n_unsupervised_image 1000000 \
     --n_unsupervised_text 1000000 \
-    --anchor_lam_x 0.1 \
-    --anchor_lam_y 0.1 \
+    --cca_lam_x 0.1 \
+    --cca_lam_y 0.1 \
+    --eig_eps 1e-6 \
     --alpha_semisupervised_sail 1.0 \
-    --alpha_semisupervised_ot 0.0001 \
-    --epsilon_sinkhorn_shared 0.1 \
-    --n_iters_sinkhorn_shared 20 \
+    --alpha_semisupervised_ot 1.0 \
+    --epsilon_sinkhorn_shared 0.03 \
+    --n_iters_sinkhorn_shared 100 \
     --epsilon_sinkhorn_anchor 0.01 \
-    --n_iters_sinkhorn_anchor 100
+    --n_iters_sinkhorn_anchor 100 \
+    --optimized_matching \
+    --match_all
+    # --alpha_semisupervised_sail 1.0 \
+
+    # TODO remove that additional multiply epsilon_shared
+
+    # --multi_text_mode
+    # --cca_topk_x 256 \
+    # --cca_topk_y 128 \
+    # --optimized_matching
+    # --kernel_cca \
+    # --kcca_kappa 0.01 \
+    # --kcca_top_k 128 \
+
+    # --match_all
+    # --alpha_semisupervised_sail 1.0 \
     # --debugging
 
     # --use_dustbin \

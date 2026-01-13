@@ -8,21 +8,32 @@ width_factor=1 # 8
 logit_scale=20
 logit_bias=-10
 
-supervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat.h5"
-# unsupervised_image_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat.h5" # imagenet1k_concat.h5"
-supervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-# unsupervised_text_embedding="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5" # wikitext103_raw_caption.h5"
-# extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
-# image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_first100k.h5"
-# text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_first100k.h5"
-output_name="a_dinov2_nv2_cc3m_nsup=10k_supsail_a=1.0_sclip_deb"
-# semisupsail_a=1.0_semisupot_a=0.0001_sh_e=0.1_20_an_e=0.01_100_cca_lam=0.1"
+# image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
+image_model="facebook/dinov2-large"
+# text_model="Qwen/Qwen3-Embedding-8B"
+# text_model="nvidia/llama-embed-nemotron-8b"
+text_model="nvidia/NV-Embed-v2"
+
+base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data"
+
+supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
+supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
+
+val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
+val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
+
+output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
+
+current_time=$(date +%Y-%m-%d_%H-%M-%S)
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_supervised_baseline"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
 python /home/eml/simon.roschmann/ot-alignment/main.py \
     --supervised_text_embedding $supervised_text_embedding \
     --supervised_image_embedding $supervised_image_embedding \
+    --val_image_embedding $val_image_embedding \
+    --val_text_embedding $val_text_embedding \
     --val-frequency 1 \
     --dataset-type embedding \
     --seed 42 \
@@ -49,15 +60,16 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --ot \
     --supervised \
     --n_supervised_pairs 10000 \
-    --nnclr \
-    --text_neighbors_path /lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_neighbors.npy \
-    --image_neighbors_path /lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_neighbors.npy \
-    --text_nn_positives 1 \
-    --image_nn_positives 1 \
-    --text_topk 1 \
-    --image_topk 1 \
-    --w_text_nn 1 \
-    --w_image_nn 0
+    --alpha_supervised_sail 1.0
+    # --nnclr \
+    # --text_neighbors_path /lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_neighbors.npy \
+    # --image_neighbors_path /lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_neighbors.npy \
+    # --text_nn_positives 1 \
+    # --image_nn_positives 1 \
+    # --text_topk 1 \
+    # --image_topk 1 \
+    # --w_text_nn 1 \
+    # --w_image_nn 0
 
 #     --alpha_supervised_sail 1.0 \
     # --alpha_semisupervised_ot 0.0001 \
