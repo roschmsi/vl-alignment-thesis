@@ -70,7 +70,16 @@ def basic_marginal_loss(
     return marginal_loss
 
 
-def sinkhorn(M, epsilon, a=None, b=None, max_iter=10000, tol=1e-5, symmetric=True):
+def sinkhorn(
+    M,
+    epsilon,
+    a=None,
+    b=None,
+    max_iter=10000,
+    tol=1e-5,
+    symmetric=True,
+    check_convergence_every=5,
+):
 
     K = -M / epsilon
     n, m = K.shape
@@ -92,13 +101,14 @@ def sinkhorn(M, epsilon, a=None, b=None, max_iter=10000, tol=1e-5, symmetric=Tru
         u = torch.log(a) - torch.logsumexp(K + v[None, :], dim=1).squeeze()
         v = torch.log(b) - torch.logsumexp(K + u[:, None], dim=0).squeeze()
 
-        # Check convergence once every 10 iterations
-        if n_iters % 10 == 0:
-            T = torch.exp(K + u[:, None] + v[None, :])
-            marginal = torch.sum(T, dim=1)
-            err = torch.max(torch.abs(marginal - a))
-            if err < tol:
-                break
+        # Check convergence once every {check_convergence_every} iterations
+        # if n_iters % check_convergence_every == 0:
+        #     T = torch.exp(K + u[:, None] + v[None, :])
+        #     marginal = torch.sum(T, dim=1)
+        #     # err = torch.max(torch.abs(marginal - a))
+        #     err = torch.sqrt(torch.mean((marginal - a) ** 2))
+        #     if err < tol:
+        #         break
 
     if (
         symmetric
