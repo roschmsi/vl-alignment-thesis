@@ -10,15 +10,30 @@ import numpy as np
 import h5py
 
 
-def get_total_h5_length(paths, key="embeddings"):
-    """Helper to count total samples without loading data."""
-    total = 0
+def get_total_h5_length(paths, key="embeddings", multi_text_mode=False):
     if not paths:
         return 0
-    for p in paths:
-        with h5py.File(p, "r") as f:
-            total += len(f[key])
-    return total
+
+    if not multi_text_mode:
+        total = 0
+        for p in paths:
+            with h5py.File(p, "r") as f:
+                total += len(f[key])
+        return total
+
+    else:
+        ref_len = None
+        for p in paths:
+            with h5py.File(p, "r") as f:
+                curr_len = len(f[key])
+
+            if ref_len is None:
+                ref_len = curr_len
+            elif curr_len != ref_len:
+                raise ValueError(
+                    f"Size mismatch: {paths[0]} has {ref_len}, but {p} has {curr_len}."
+                )
+        return ref_len
 
 
 class SharedEpoch:
@@ -60,6 +75,7 @@ def get_embedding_dataset(
     batch_size_supervised=None,
     unsupervised_index_mode="random",  # "aligned", "disjoint", "random"
     debugging=False,
+    multi_text_mode=False,
     # NNCLR parameters
     text_nn_positives=0,
     image_nn_positives=0,
@@ -69,7 +85,9 @@ def get_embedding_dataset(
     image_topk=0,
 ):
     # Assert supervised text and image files are parallel and have same length
-    len_text = get_total_h5_length(supervised_text_embedding, key="embeddings")
+    len_text = get_total_h5_length(
+        supervised_text_embedding, key="embeddings", multi_text_mode=multi_text_mode
+    )
     len_image = get_total_h5_length(supervised_image_embedding, key="embeddings")
 
     assert len_text == len_image, (
@@ -204,6 +222,7 @@ def get_embedding_dataset(
             image_paths=supervised_image_embedding,
             indices=sup_indices,
             h5_key="embeddings",
+            multi_text_mode=multi_text_mode,
         )
 
         bimodal_loader = DataLoader(
@@ -297,6 +316,7 @@ def get_embedding_dataset(
                 image_paths=supervised_image_embedding,
                 indices=sup_indices,
                 h5_key="embeddings",
+                multi_text_mode=multi_text_mode,
             )
 
         bimodal_loader = DataLoader(
@@ -399,6 +419,7 @@ def get_data(args, epoch=0):
             n_unsupervised_text=args.n_unsupervised_text,
             batch_size_supervised=args.batch_size_supervised,
             unsupervised_index_mode=args.unsupervised_index_mode,
+            multi_text_mode=args.multi_text_mode,
             debugging=args.debugging,
             text_nn_positives=args.text_nn_positives,
             image_nn_positives=args.image_nn_positives,

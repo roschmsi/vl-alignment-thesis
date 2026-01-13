@@ -107,8 +107,8 @@ def parse_args(args):
     )
     parser.add_argument(
         "--width-factor",
-        type=int,
-        default=8,
+        type=float,
+        default=8.0,
         help="Width factor for star mlp.",
     )
     parser.add_argument(
@@ -841,24 +841,30 @@ def parse_args(args):
         help="Whiten anchors when computing OT plan.",
     )
     parser.add_argument(
-        "--anchor_lam_x",
+        "--cca_lam_x",
         type=float,
         help="Regularization parameter for anchor covariance in x.",
     )
     parser.add_argument(
-        "--anchor_lam_y",
+        "--cca_lam_y",
         type=float,
         help="Regularization parameter for anchor covariance in y.",
     )
     parser.add_argument(
-        "--anchor_rank_k_x",
+        "--cca_topk_x",
         type=int,
         help="Use rank-k approximation for anchor covariance in x.",
     )
     parser.add_argument(
-        "--anchor_rank_k_y",
+        "--cca_topk_y",
         type=int,
         help="Use rank-k approximation for anchor covariance in y.",
+    )
+    parser.add_argument(
+        "--eig_eps",
+        type=float,
+        default=1e-8,
+        help="Epsilon for eigenvalue regularization in CCA.",
     )
     parser.add_argument(
         "--anchor_relrenorm",
@@ -1029,6 +1035,71 @@ def parse_args(args):
         default="random",
         choices=["aligned", "disjoint", "random"],
         help="How to select indices for unsupervised data.",
+    )
+    parser.add_argument(
+        "--optimized_matching",
+        default=False,
+        action="store_true",
+        help="Use optimized matching for OT computation.",
+    )
+    parser.add_argument(
+        "--match_all",
+        default=False,
+        action="store_true",
+        help="Match all supervised and unsupervised samples when computing OT plan.",
+    )
+    parser.add_argument(
+        "--tol_sinkhorn",
+        type=float,
+        default=1e-6,
+        help="Tolerance for Sinkhorn algorithm.",
+    )
+    parser.add_argument(
+        "--kernel_cca",
+        default=False,
+        action="store_true",
+        help="Use kernel CCA in anchor space.",
+    )
+    parser.add_argument(
+        "--kcca_kappa",
+        type=float,
+        help="KCCA regularization parameter.",
+    )
+    parser.add_argument(
+        "--kcca_sigma",
+        type=int,
+        default=None,
+        help="KCCA RBF kernel width.",
+    )
+    parser.add_argument(
+        "--kcca_top_k",
+        type=int,
+        default=None,
+        help="KCCA top-k sparsification.",
+    )
+    parser.add_argument(
+        "--multi_text_mode",
+        default=False,
+        action="store_true",
+        help="Use multiple text embeddings per image in anchor space.",
+    )
+    parser.add_argument(
+        "--procrustes",
+        default=False,
+        action="store_true",
+        help="Use Procrustes analysis for anchor alignment.",
+    )
+    parser.add_argument(
+        "--local_cca",
+        default=False,
+        action="store_true",
+        help="Use local CCA for alignment.",
+    )
+    parser.add_argument(
+        "--sparse_cca",
+        default=False,
+        action="store_true",
+        help="Use sparse CCA for alignment.",
     )
 
     args = parser.parse_args(args)

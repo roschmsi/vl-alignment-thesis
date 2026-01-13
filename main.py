@@ -360,7 +360,7 @@ def main(args):
     monitor_metric = "mean_R@1"
     best_metric = float("-inf")
 
-    if args.ot:
+    if args.ot and args.semisupervised:
         with torch.no_grad():
             bimodal_loader = data["train"].bimodal_loader
             text_loader = data["train"].text_loader
@@ -370,44 +370,86 @@ def main(args):
             X_pairs = X_pairs.to(device, non_blocking=True)
             Y_pairs = Y_pairs.to(device, non_blocking=True)
 
+            # TODO check if weighting other than mean is better for multi-view text
+            if X_pairs.ndim == 3:
+                logging.info(
+                    "Collapsing multi-view text to robust mean for Anchor Space."
+                )
+                X_pairs = F.normalize(X_pairs, p=2, dim=-1)
+                X_pairs = X_pairs.mean(dim=1)
+                X_pairs = F.normalize(X_pairs, p=2, dim=-1)
+
             # ensure normalization
             X_pairs = F.normalize(X_pairs, p=2, dim=1)
             Y_pairs = F.normalize(Y_pairs, p=2, dim=1)
 
-            cov_tracker_X = IncrementalCovariance(device, hidden_dim=X_pairs.shape[1])
-            cov_tracker_Y = IncrementalCovariance(device, hidden_dim=Y_pairs.shape[1])
+            if args.kernel_cca:
+                logging.info("Using kernel CCA in anchor space.")
+                loss.fit_kcca(
+                    X_pairs=X_pairs,
+                    Y_pairs=Y_pairs,
+                    kappa=args.kcca_kappa,
+                    sigma=args.kcca_sigma,
+                    top_k=args.kcca_top_k,
+                )
 
-            # add paired data
-            cov_tracker_X.update(X_pairs)
-            cov_tracker_Y.update(Y_pairs)
+            elif args.local_cca:
+                logging.info("Using local CCA in anchor space.")
+                loss.fit_local_cca(
+                    X_pairs=X_pairs,
+                    Y_pairs=Y_pairs,
+                    # TODO complete with other hyperparameters
+                )
+            elif args.sparse_cca:
+                logging.info("Using sparse CCA in anchor space.")
+                loss.fit_sparse_cca(
+                    X=X_pairs,
+                    Y=Y_pairs,
+                    # penalty_x=args.sparse_cca_penalty_x,
+                    # penalty_y=args.sparse_cca_penalty_y,
+                    # max_iter=args.sparse_cca_max_iter,
+                    # tol=args.sparse_cca_tol,
+                )
+            else:
 
-            # add unpaired data
-            # TODO may not be beneficial for totally unpaired setting due to domain shift
-            # for batch_x, batch_y in zip(text_loader, image_loader):
-            #     batch_x = F.normalize(batch_x, p=2, dim=1)
-            #     batch_y = F.normalize(batch_y, p=2, dim=1)
-            #     cov_tracker_X.update(batch_x)
-            #     cov_tracker_Y.update(batch_y)
+                cov_tracker_X = IncrementalCovariance(
+                    device, hidden_dim=X_pairs.shape[1]
+                )
+                cov_tracker_Y = IncrementalCovariance(
+                    device, hidden_dim=Y_pairs.shape[1]
+                )
 
-            # compute mean and covariance
-            Sxx_total, mean_x_total = cov_tracker_X.compute()
-            Syy_total, mean_y_total = cov_tracker_Y.compute()
+                # add paired data
+                cov_tracker_X.update(X_pairs)
+                cov_tracker_Y.update(Y_pairs)
 
-            loss.precompute_anchor_covariances(
-                X_pairs=X_pairs,
-                Y_pairs=Y_pairs,
-                Sxx_total=Sxx_total,
-                Syy_total=Syy_total,
-                mean_x_total=mean_x_total,
-                mean_y_total=mean_y_total,
-            )
+                # add unpaired data
+                # TODO may not be beneficial for totally unpaired setting due to domain shift
+                # for batch_x, batch_y in zip(text_loader, image_loader):
+                #     batch_x = F.normalize(batch_x, p=2, dim=1)
+                #     batch_y = F.normalize(batch_y, p=2, dim=1)
+                #     cov_tracker_X.update(batch_x)
+                #     cov_tracker_Y.update(batch_y)
 
-            loss.precompute_cca_projections(
-                X=X_pairs,
-                Y=Y_pairs,
-                lam_x=args.anchor_lam_x,
-                lam_y=args.anchor_lam_y,
-            )
+                # compute mean and covariance
+                Sxx_total, mean_x_total = cov_tracker_X.compute()
+                Syy_total, mean_y_total = cov_tracker_Y.compute()
+
+                loss.precompute_anchor_covariances(
+                    X_pairs=X_pairs,
+                    Y_pairs=Y_pairs,
+                    Sxx_total=Sxx_total,
+                    Syy_total=Syy_total,
+                    mean_x_total=mean_x_total,
+                    mean_y_total=mean_y_total,
+                )
+
+                if args.procrustes:
+                    logging.info("Using Procrustes alignment in anchor space.")
+                    loss.precompute_procrustes_projections()
+                else:
+                    logging.info("Using linear CCA in anchor space.")
+                    loss.precompute_cca_projections()
 
             if args.alpha_semisupervised_clusters > 0:
                 loss.init_clusters(

@@ -1,5 +1,5 @@
 from model.sclip import SemiSupervisedClipLoss
-from optimal_transport.matching import FullMatchingModel
+from optimal_transport.matching import MatchingModel, OptimizedMatchingModel
 from .sail_model import AlignmentLayer, SAILModel, ShareLockAlignmentLayer
 from .vision_model import ImageEmbedding
 from .language_model import SentenceEmbedding
@@ -134,15 +134,31 @@ def create_loss(args):
             # softmax kl approaches
             "temperature_softmax": args.temperature_softmax,
             # anchors advanced
-            "anchor_center": args.anchor_center,
-            "anchor_whiten": args.anchor_whiten,
-            "anchor_lam_x": args.anchor_lam_x,
-            "anchor_lam_y": args.anchor_lam_y,
-            "anchor_rank_k_x": args.anchor_rank_k_x,
-            "anchor_rank_k_y": args.anchor_rank_k_y,
-            "anchor_relrenorm": args.anchor_relrenorm,
+            # "anchor_center": args.anchor_center,
+            # "anchor_whiten": args.anchor_whiten,
+            "cca_lam_x": args.cca_lam_x,
+            "cca_lam_y": args.cca_lam_y,
+            "cca_topk_x": args.cca_topk_x,
+            "cca_topk_y": args.cca_topk_y,
+            "eig_eps": args.eig_eps,
+            # matching
+            "match_all": args.match_all,
+            "tol_sinkhorn": args.tol_sinkhorn,
+            # kernel CCA
+            "kernel_cca": args.kernel_cca,
+            "kcca_kappa": args.kcca_kappa,
+            "kcca_sigma": args.kcca_sigma,
+            "kcca_top_k": args.kcca_top_k,
+            # procrustes
+            "procrustes": args.procrustes,
+            "local_cca": args.local_cca,
+            "sparse_cca": args.sparse_cca,
         }
-        return FullMatchingModel(loss_config)
+        if args.optimized_matching:
+            print("Using Full Matching Model with optimized OT losses")
+            return OptimizedMatchingModel(loss_config)
+        else:
+            return MatchingModel(loss_config)
 
     elif args.siglip:
         print("Using SigLip loss")

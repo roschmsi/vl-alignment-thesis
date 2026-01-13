@@ -116,6 +116,13 @@ def train_one_epoch_semisupervised(
 
         texts_paired = texts_paired.to(device)
         images_paired = images_paired.to(device)
+
+        if texts_paired.ndim == 3:
+            # Norm -> Mean -> Norm
+            texts_paired = F.normalize(texts_paired, p=2, dim=-1)
+            texts_paired = texts_paired.mean(dim=1)
+            texts_paired = F.normalize(texts_paired, p=2, dim=-1)
+
         texts_unpaired = texts_unpaired.to(device)
         images_unpaired = images_unpaired.to(device)
 
@@ -175,6 +182,9 @@ def train_one_epoch_semisupervised(
                     fY_pairs=model_out_paired["image_features"],
                     logit_scale=logit_scale,
                     logit_bias=logit_bias,
+                    epoch=epoch,
+                    batch_idx=i_accum,
+                    save_dist=True,
                 )
 
         backward(total_loss, scaler)

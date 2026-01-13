@@ -47,7 +47,7 @@ class H5Base(Dataset):
 
         for path, file_start, file_end in file_boundaries:
             # Check if any of our requested indices are in this file at all
-            # (Global Index) >= (File Start)  AND  (Global Index) < (File End)
+            # global index range for this file: [file_start, file_end)
             file_mask = (self.indices >= file_start) & (self.indices < file_end)
 
             if not np.any(file_mask):
@@ -59,18 +59,16 @@ class H5Base(Dataset):
             with h5py.File(path, "r") as f:
                 dset = f[h5_key]
 
-                # Iterate over the file in chunks of 'chunk_size'
-                # tqdm handles the progress bar for the chunks
                 for chunk_start in tqdm(
                     range(0, file_len, chunk_size), desc="Loading chunks"
                 ):
                     chunk_end = min(chunk_start + chunk_size, file_len)
 
-                    # Calculate the GLOBAL index range for this specific chunk
+                    # global index range for current chunk
                     global_chunk_start = file_start + chunk_start
                     global_chunk_end = file_start + chunk_end
 
-                    # Find which requested indices fall into this specific chunk
+                    # which requested indices fall into the current chunk
                     chunk_mask = (self.indices >= global_chunk_start) & (
                         self.indices < global_chunk_end
                     )
@@ -78,21 +76,12 @@ class H5Base(Dataset):
                     if not np.any(chunk_mask):
                         continue
 
-                    # 1. Identify where in self.data these rows need to go
                     dest_slots = np.where(chunk_mask)[0]
 
-                    # 2. Identify which rows in the CURRENT CHUNK we need
-                    # (Global Index) - (Global Chunk Start) = (Index relative to this chunk 0..500k)
                     chunk_local_indices = self.indices[chunk_mask] - global_chunk_start
-
-                    # 3. Read ONLY this chunk into RAM (e.g. 500k rows)
-                    # This is the heavy I/O step, but it's bounded by chunk_size
                     chunk_data = dset[chunk_start:chunk_end]
-
-                    # 4. specific indexing in RAM (fast)
                     selected_rows = chunk_data[chunk_local_indices]
 
-                    # 5. Store in main tensor
                     self.data[dest_slots] = torch.from_numpy(selected_rows).to(dtype)
 
         print(f"Successfully loaded {len(self.data)} samples.")
@@ -105,16 +94,47 @@ class H5Base(Dataset):
 
 
 class H5BimodalDataset(Dataset):
-    def __init__(self, text_paths, image_paths, indices, h5_key="embeddings"):
+    def __init__(
+        self,
+        text_paths,
+        image_paths,
+        indices,
+        h5_key="embeddings",
+        multi_text_mode=False,
+    ):
         self.indices = indices
-        self.text_db = H5Base(paths=text_paths, h5_key=h5_key, indices=indices)
+        self.multi_text_mode = multi_text_mode
+
+        # load images
         self.image_db = H5Base(paths=image_paths, h5_key=h5_key, indices=indices)
 
+        if self.multi_text_mode:
+            # treat text_paths as parallel (e.g. raw and synthetic captions)
+            self.text_dbs = []
+            print(f"Initializing {len(text_paths)} parallel text datasets...")
+            for i, path in enumerate(text_paths):
+                paths_input = path if isinstance(path, list) else [path]
+                print(f"--- Loading Text Version {i+1} ---")
+                self.text_dbs.append(
+                    H5Base(paths=paths_input, h5_key=h5_key, indices=indices)
+                )
+        else:
+            # treat all text as one source
+            self.text_db = H5Base(paths=text_paths, h5_key=h5_key, indices=indices)
+
     def __len__(self):
-        return len(self.text_db)
+        return len(self.image_db)
 
     def __getitem__(self, idx):
-        return self.text_db[idx], self.image_db[idx]
+        img = self.image_db[idx]
+
+        if self.multi_text_mode:
+            # retrieve text from all databasese and stack them
+            texts = torch.stack([db[idx] for db in self.text_dbs])
+            return texts, img
+        else:
+            # standard single text return
+            return self.text_db[idx], img
 
 
 class H5UnimodalDataset(H5Base):
