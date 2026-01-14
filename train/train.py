@@ -170,6 +170,25 @@ def train_one_epoch_semisupervised(
                 # )
 
                 total_loss = logs["total_loss"]
+
+            if args.structure:
+                logs = loss(
+                    image_embeddings_aligned=model_out_paired["image_features"],
+                    text_embeddings_aligned=model_out_paired["text_features"],
+                    image_embeddings_original=images_paired,
+                    text_embeddings_original=texts_paired,
+                    add_image_features=(
+                        images_unpaired,
+                        model_out_unpaired["image_features"],
+                    ),
+                    add_text_features=(
+                        texts_unpaired,
+                        model_out_unpaired["text_features"],
+                    ),
+                )
+
+                total_loss = logs["overall_loss"]
+
             else:
                 total_loss, logs = loss(
                     X=texts_unpaired,

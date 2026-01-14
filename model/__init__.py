@@ -1,4 +1,5 @@
 from model.sclip import SemiSupervisedClipLoss
+from model.structure import StructureLoss
 from optimal_transport.matching import MatchingModel, OptimizedMatchingModel
 from .sail_model import AlignmentLayer, SAILModel, ShareLockAlignmentLayer
 from .vision_model import ImageEmbedding
@@ -107,6 +108,15 @@ def create_loss(args):
             weight_unpaired_texts=args.sclip_weight_unpaired_texts,
             rank=args.rank,
             world_size=args.world_size,
+        )
+    elif args.structure:
+        print("Using Structure loss")
+        return StructureLoss(
+            temperature=args.structure_temperature,
+            normalize_latents=args.structure_normalize_latents,
+            warmup_steps=args.structure_warmup_steps,
+            structure_lambda=args.structure_lambda,
+            structure_levels=args.structure_levels,
         )
     elif args.ot:
         loss_config = {

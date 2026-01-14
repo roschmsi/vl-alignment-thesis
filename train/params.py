@@ -1101,6 +1101,38 @@ def parse_args(args):
         action="store_true",
         help="Use sparse CCA for alignment.",
     )
+    parser.add_argument(
+        "--structure",
+        default=False,
+        action="store_true",
+        help="Use structure preservation loss.",
+    )
+    parser.add_argument(
+        "--structure_temperature",
+        type=float,
+        help="Temperature for structure preservation loss.",
+    )
+    parser.add_argument(
+        "--structure_normalize_latents",
+        default=False,
+        action="store_true",
+        help="Whether to normalize latents for structure preservation loss.",
+    )
+    parser.add_argument(
+        "--structure_warmup_steps",
+        type=int,
+        help="Number of warmup steps for structure preservation loss.",
+    )
+    parser.add_argument(
+        "--structure_lambda",
+        type=float,
+        help="Lambda weight for structure preservation loss.",
+    )
+    parser.add_argument(
+        "--structure_levels",
+        type=int,
+        help="Number of levels for structure preservation loss.",
+    )
 
     args = parser.parse_args(args)
 
