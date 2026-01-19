@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name="train ot alignment"
+#SBATCH --job-name="train siglip sup"
 #SBATCH --partition=gpu_p
 #SBATCH --qos=gpu_normal
 #SBATCH --mem=200G
@@ -7,38 +7,31 @@
 #SBATCH --constraint="h100_80gb|a100_80gb"
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=2:00:00
-#SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_train_ot_alignment.out
-#SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_train_ot_alignment.err
+#SBATCH --time=4:00:00
+#SBATCH -o /home/eml/simon.roschmann/slurm/slurm-%j_train_siglip_sup_alignment.out
+#SBATCH -e /home/eml/simon.roschmann/slurm/slurm-%j_train_siglip_sup_alignment.err
 
 source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
 conda activate ot_env
 
-# bash /home/eml/simon.roschmann/ot-alignment/scripts/ot_train.sh
-
-#!/bin/bash
-
-epoch_num=100  # 300  # 800
-lr=1e-3
+epoch_num=20
+lr=1e-4
 bs=32768
 d=1024
 width_factor=1 # 8
 logit_scale=20
 logit_bias=-10
 
-image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
-# image_model="facebook/dinov2-large"
-# text_model="Qwen/Qwen3-Embedding-8B"
+# image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
+image_model="facebook/dinov2-large"
+text_model="Qwen/Qwen3-Embedding-8B"
 # text_model="nvidia/llama-embed-nemotron-8b"
-text_model="nvidia/NV-Embed-v2"
+# text_model="nvidia/NV-Embed-v2"
 
 base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data"
 
 supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
-unsupervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
 supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # /cc3m_raw_caption.h5"
-# unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=0.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=1.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=2.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=3.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=4.h5" # wikitext103_raw_caption.h5"
 
 val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
 val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
@@ -46,23 +39,20 @@ val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 current_time=$(date +%Y-%m-%d_%H-%M-%S)
-output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_sup=10k_unsup=1M_ep=100_lr=1e-3" # topk_x=256_topk_y=128"
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_sup=1M_siglip_fix_norm" # topk_x=256_topk_y=128"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
 python /home/eml/simon.roschmann/ot-alignment/main.py \
     --supervised_text_embedding $supervised_text_embedding \
     --supervised_image_embedding $supervised_image_embedding \
-    --unsupervised_text_embedding $unsupervised_text_embedding \
-    --unsupervised_image_embedding $unsupervised_image_embedding \
-    --unsupervised_index_mode disjoint \
     --val_image_embedding $val_image_embedding \
     --val_text_embedding $val_text_embedding \
-    --val-frequency 1 \
+    --val-frequency 10 \
     --dataset-type embedding \
     --seed 42 \
     --resume latest \
-    --save-frequency 20 \
+    --save-frequency 50 \
     --report-to wandb \
     --batch-size $bs \
     --lr $lr \
@@ -82,24 +72,9 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --logs $output_dir \
     --hdf5 \
     --ot \
-    --semisupervised \
-    --n_supervised_pairs 10000 \
-    --batch-size-supervised 10000 \
-    --n_unsupervised_image 1000000 \
-    --n_unsupervised_text 1000000 \
-    --cca_lam_x 0.1 \
-    --cca_lam_y 0.1 \
-    --eig_eps 1e-6 \
-    --alpha_semisupervised_sail 1.0 \
-    --alpha_semisupervised_ot 0.0001 \
-    --epsilon_sinkhorn_shared 0.05 \
-    --n_iters_sinkhorn_shared 100 \
-    --epsilon_sinkhorn_anchor 0.01 \
-    --n_iters_sinkhorn_anchor 100 \
-    --optimized_matching \
-    --affinity cca
-    # --alpha_semisupervised_sail 1.0 \
-    # --match_all
+    --supervised \
+    --n_supervised_pairs 1000000 \
+    --alpha_supervised_sail 1.0
 
 if [ $? -ne 0 ]; then
     echo "Training failed. Checking for checkpoints..."
@@ -131,8 +106,8 @@ for task in imagenetv1 COCO; do
     python /home/eml/simon.roschmann/ot-alignment/eval.py \
         --head-weights-path "$BEST_CKPT" \
         --task "$task" \
-        --vision-model "$image_model" \
-        --text-model "$text_model" \
+        --vision-model "facebook/dinov2-large" \
+        --text-model "nvidia/NV-Embed-v2" \
         --dataset_root_dir "/lustre/groups/eml/projects/sroschmann/data" \
         --batch_size 32 \
         --agg_mode concat \

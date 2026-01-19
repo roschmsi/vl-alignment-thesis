@@ -1,11 +1,12 @@
 #!/bin/bash
 
-epoch_num=20
+epoch_num=20  # 300  # 800
 lr=1e-4
-bs=24576  # 32768 resulted in OOM
+bs=32768
 d=1024
-width_factor=1
-logit_scale=20.0
+width_factor=1 # 8
+logit_scale=20
+logit_bias=-10
 
 # image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
 image_model="facebook/dinov2-large"
@@ -26,7 +27,7 @@ val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 current_time=$(date +%Y-%m-%d_%H-%M-%S)
-output_name="${current_time}_${image_model##*/}_${text_model##*/}_structure_baseline_lam=1000_warmup=500"
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_sup=10k_unsup=1M_siglip_deb" # topk_x=256_topk_y=128"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
@@ -35,18 +36,19 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --supervised_image_embedding $supervised_image_embedding \
     --unsupervised_text_embedding $unsupervised_text_embedding \
     --unsupervised_image_embedding $unsupervised_image_embedding \
+    --unsupervised_index_mode disjoint \
     --val_image_embedding $val_image_embedding \
     --val_text_embedding $val_text_embedding \
     --val-frequency 1 \
     --dataset-type embedding \
     --seed 42 \
     --resume latest \
-    --save-frequency 10 \
+    --save-frequency 20 \
     --report-to wandb \
     --batch-size $bs \
     --lr $lr \
     --epochs $epoch_num \
-    --workers 24 \
+    --workers 8 \
     --optimizer lion \
     --siglip \
     --wd 1e-5 \
@@ -57,17 +59,15 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --wandb-project-name semisupervised_alignment \
     --name $output_name \
     --logit_scale $logit_scale \
-    --logs /lustre/groups/eml/projects/sroschmann/ot_logs \
+    --logit_bias $logit_bias \
+    --logs $output_dir \
     --hdf5 \
+    --ot \
     --semisupervised \
     --n_supervised_pairs 10000 \
     --batch-size-supervised 10000 \
-    --n_unsupervised_text 1000000 \
     --n_unsupervised_image 1000000 \
-    --structure \
-    --structure_temperature 0.05 \
-    --structure_normalize_latents \
-    --structure_warmup_steps 0 \
-    --structure_lambda 10 \
-    --structure_levels 1
-    # --debugging
+    --n_unsupervised_text 1000000 \
+    --alpha_semisupervised_sail 1.0 \
+    --optimized_matching \
+    --debugging

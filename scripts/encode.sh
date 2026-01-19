@@ -1,21 +1,22 @@
-vision_model="facebook/dinov2-large"
-text_model="nvidia/NV-Embed-v2"
-# vision_model="google/siglip2-large-patch16-384"
-# text_model="google/siglip2-large-patch16-384"
+# vision_model="valeoai/franca_vitl14"
+# vision_model="valeoai/franca_vitg14"
+# vision_model="facebook/dinov2-large"
+# vision_model="facebook/dinov3-vit7b16-pretrain-lvd1689m"
+vision_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
+# text_model="nvidia/NV-Embed-v2"
+text_model="Qwen/Qwen3-Embedding-8B"
+# text_model="nvidia/llama-embed-nemotron-8b"
 # data="imagenet1k"
-# domain="image"
+# data="diffusion_db"
 # data="coco"
 # coco_caption_index=4
-# domain="image"
-# data="diffusion_db"
-# domain="text"
-data="coco"
-domain="image"
+data="cc3m"
+domain="text"
 batch_size=32
 source_caption="raw_caption"
 agg_mode="concat"
-input_dir="/lustre/groups/eml/datasets/coco"
-# input_dir="/lustre/groups/eml/projects/sroschmann/diffusion_db"
+input_dir="/lustre/groups/eml/projects/sroschmann/cc3m" # _recaptioned
+# input_dir="/lustre/groups/eml/datasets/coco"
 output_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment"
 
 python /home/eml/simon.roschmann/ot-alignment/encode.py \
@@ -29,5 +30,8 @@ python /home/eml/simon.roschmann/ot-alignment/encode.py \
 --agg_mode "$agg_mode" \
 --num_workers 4 \
 --input_dir "$input_dir" \
---output_dir "$output_dir"
+--output_dir "$output_dir" \
+--split validation
 # --coco_caption_index "$coco_caption_index"
+# --start_shard_index 256
+# --end_shard_index 255

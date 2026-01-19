@@ -19,7 +19,8 @@ base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_d
 supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
 unsupervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
 supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+# unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
+unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=0.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=1.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=2.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=3.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=4.h5" # wikitext103_raw_caption.h5"
 
 val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
 val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
@@ -31,7 +32,7 @@ val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 current_time=$(date +%Y-%m-%d_%H-%M-%S)
-output_name="${current_time}_${image_model##*/}_${text_model##*/}_no_tol_cc3m_sh=0.1_10_an=0.01_100" # topk_x=256_topk_y=128"
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_coco_text_deb" # topk_x=256_topk_y=128"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
@@ -77,10 +78,12 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --eig_eps 1e-6 \
     --alpha_semisupervised_sail 1.0 \
     --alpha_semisupervised_ot 0.0001 \
-    --epsilon_sinkhorn_shared 0.1 \
-    --n_iters_sinkhorn_shared 10 \
+    --epsilon_sinkhorn_shared 0.05 \
+    --n_iters_sinkhorn_shared 100 \
     --epsilon_sinkhorn_anchor 0.01 \
     --n_iters_sinkhorn_anchor 100 \
+    --optimized_matching \
+    --affinity cca \
     --debugging
     # --optimized_matching \
 
@@ -123,8 +126,8 @@ for task in imagenetv1 COCO; do
     python /home/eml/simon.roschmann/ot-alignment/eval.py \
         --head-weights-path "$BEST_CKPT" \
         --task "$task" \
-        --vision-model "facebook/dinov2-large" \
-        --text-model "nvidia/NV-Embed-v2" \
+        --vision-model "$image_model" \
+        --text-model "$text_model" \
         --dataset_root_dir "/lustre/groups/eml/projects/sroschmann/data" \
         --batch_size 32 \
         --agg_mode concat \
