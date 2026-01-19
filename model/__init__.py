@@ -120,32 +120,18 @@ def create_loss(args):
         )
     elif args.ot:
         loss_config = {
-            "divergence": args.divergence,
-            # Loss weights
-            "alpha_marginal": args.alpha_marginal,
             "alpha_supervised_sail": args.alpha_supervised_sail,
-            "alpha_supervised_explicit": args.alpha_supervised_explicit,
-            "alpha_supervised_implicit": args.alpha_supervised_implicit,
+            "alpha_semisupervised_sail": args.alpha_semisupervised_sail,
             "alpha_semisupervised_ot": args.alpha_semisupervised_ot,
             "alpha_semisupervised_ot_all": args.alpha_semisupervised_ot_all,
-            "alpha_semisupervised_clusters": args.alpha_semisupervised_clusters,
-            "alpha_semisupervised_sail": args.alpha_semisupervised_sail,
             "alpha_semisupervised_monge_gap": args.alpha_semisupervised_monge_gap,
-            "alpha_semisupervised_div": args.alpha_semisupervised_div,
-            "alpha_semisupervised_double_softmax": args.alpha_semisupervised_double_softmax,
-            "alpha_semisupervised_conditional_kl": args.alpha_semisupervised_conditional_kl,
-            "alpha_semisupervised_joint_kl": args.alpha_semisupervised_joint_kl,
-            "alpha_unsupervised": args.alpha_unsupervised,
+            "alpha_semisupervised_softmax": args.alpha_semisupervised_softmax,
             # Sinkhorn params
             "epsilon_sinkhorn_shared": args.epsilon_sinkhorn_shared,
             "n_iters_sinkhorn_shared": args.n_iters_sinkhorn_shared,
             "epsilon_sinkhorn_anchor": args.epsilon_sinkhorn_anchor,
             "n_iters_sinkhorn_anchor": args.n_iters_sinkhorn_anchor,
             # softmax kl approaches
-            "temperature_softmax": args.temperature_softmax,
-            # anchors advanced
-            # "anchor_center": args.anchor_center,
-            # "anchor_whiten": args.anchor_whiten,
             "cca_lam_x": args.cca_lam_x,
             "cca_lam_y": args.cca_lam_y,
             "cca_topk_x": args.cca_topk_x,
@@ -153,16 +139,6 @@ def create_loss(args):
             "eig_eps": args.eig_eps,
             # matching
             "match_all": args.match_all,
-            "tol_sinkhorn": args.tol_sinkhorn,
-            # kernel CCA
-            "kernel_cca": args.kernel_cca,
-            "kcca_kappa": args.kcca_kappa,
-            "kcca_sigma": args.kcca_sigma,
-            "kcca_top_k": args.kcca_top_k,
-            # procrustes
-            "procrustes": args.procrustes,
-            "local_cca": args.local_cca,
-            "sparse_cca": args.sparse_cca,
         }
         if args.optimized_matching:
             print("Using Full Matching Model with optimized OT losses")

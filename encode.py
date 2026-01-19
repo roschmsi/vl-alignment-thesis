@@ -197,9 +197,9 @@ def process_batch_from_loader(
     for batch_data in tqdm(data_loader, desc="Encoding Batches"):
         # Forward pass
         start_t = time.time()
-        with torch.cuda.amp.autocast():
-            with torch.no_grad():
-                batch_embeddings = model_func(batch_data)
+        # with torch.cuda.amp.autocast():
+        with torch.no_grad():
+            batch_embeddings = model_func(batch_data)
         end_t = time.time()
 
         # Bookkeeping
@@ -230,7 +230,13 @@ def process_batch_from_loader(
             continue
 
         # Convert dtype to float16 (to match original .half() saving)
-        emb_np = batch_embeddings.detach().to("cpu").numpy().astype(np.float16)
+        emb_np = batch_embeddings.detach().cpu().to(torch.float32).numpy()
+
+        # check for nans/infs
+        if np.isnan(emb_np).any() or np.isinf(emb_np).any():
+            raise ValueError("NaN or Inf detected in embeddings")
+
+        emb_np = emb_np.astype(np.float16)
 
         # Lazy create file + dataset once we know feature shape
         if h5f is None:
@@ -407,9 +413,11 @@ def load_webdataset(data_path, source_caption, domain):
         dataset = dataset.map(image_extractor, handler=wds.warn_and_continue)
 
     elif domain == "text":
+        if "recaptioned" in data_path:
+            dataset = dataset.decode()
 
         def text_extractor(sample):
-            # print(sample.keys())
+            print(sample.keys())
             # print(sample["json"].keys())
             if "json" in sample.keys():
                 return sample["json"][source_caption]

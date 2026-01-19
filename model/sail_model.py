@@ -126,6 +126,8 @@ class AlignmentLayer(nn.Module):
         compute_logits=False,
     ):
 
+        # TODO check if there is any difference if features for alignment layer are l2 normalized or not
+
         if image_features is None and text_features is None:
             raise ValueError(
                 "At least one of image_features and text_features should be provided."

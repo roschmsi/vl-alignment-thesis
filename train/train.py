@@ -335,16 +335,6 @@ def train_one_epoch_supervised(
                     logit_bias=model_out_paired["logit_bias"],
                 )
                 total_loss = logs["total_loss"]
-            elif args.alpha_supervised_implicit == 1.0:
-                _, log_plan_pairs = loss.match_in_latent(
-                    model_out_paired["text_features"],
-                    model_out_paired["image_features"],
-                )
-
-                total_loss = loss.loss_supervised_implicit(
-                    log_plan_pairs=log_plan_pairs
-                )
-                logs = {"loss_supervised_implicit": total_loss.item()}
             elif args.alpha_supervised_sail == 1.0:
                 total_loss = loss.loss_supervised_sail(
                     model_out_paired["text_features"],

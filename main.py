@@ -13,6 +13,8 @@ from torch import optim
 import yaml
 import torch.nn.functional as F
 
+from optimal_transport.similarity import CCA, Anchors, CCA
+
 try:
     import wandb
 except ImportError:
@@ -34,6 +36,9 @@ from train.optimizer import Lion
 
 from model import create_model, create_loss, create_loss
 from data import get_data
+
+import json
+from pathlib import Path
 
 
 LATEST_CHECKPOINT_NAME = "epoch_latest.pt"
@@ -201,6 +206,21 @@ def main(args):
                 logging.info(f"  {name}: {val}")
                 f.write(f"{name}: {val}\n")
 
+        params_json = Path(args.logs) / args.name / "params.json"
+
+        def to_jsonable(x):
+            # Handle common non-JSON types gracefully
+            if isinstance(x, Path):
+                return str(x)
+            # Add more conversions here if needed (e.g., Enum, numpy)
+            return x
+
+        params = {k: to_jsonable(v) for k, v in vars(args).items()}
+
+        params_json.parent.mkdir(parents=True, exist_ok=True)
+        with open(params_json, "w", encoding="utf-8") as f:
+            json.dump(params, f, indent=2, sort_keys=True)
+
         # Save model configuration as YAML file
         model_config = {
             "target_dimension": args.target_dimension,
@@ -357,14 +377,9 @@ def main(args):
 
     loss = create_loss(args)
 
-    monitor_metric = "mean_R@1"
-    best_metric = float("-inf")
-
-    if args.ot and args.semisupervised:
+    if args.semisupervised and args.ot and args.affinity is not None:
         with torch.no_grad():
             bimodal_loader = data["train"].bimodal_loader
-            text_loader = data["train"].text_loader
-            image_loader = data["train"].image_loader
 
             X_pairs, Y_pairs = _collect_all_batches(bimodal_loader)
             X_pairs = X_pairs.to(device, non_blocking=True)
@@ -383,81 +398,43 @@ def main(args):
             X_pairs = F.normalize(X_pairs, p=2, dim=1)
             Y_pairs = F.normalize(Y_pairs, p=2, dim=1)
 
-            if args.kernel_cca:
-                logging.info("Using kernel CCA in anchor space.")
-                loss.fit_kcca(
-                    X_pairs=X_pairs,
-                    Y_pairs=Y_pairs,
-                    kappa=args.kcca_kappa,
-                    sigma=args.kcca_sigma,
-                    top_k=args.kcca_top_k,
-                )
+            # cov_tracker_X = IncrementalCovariance(device, hidden_dim=X_pairs.shape[1])
+            # cov_tracker_Y = IncrementalCovariance(device, hidden_dim=Y_pairs.shape[1])
 
-            elif args.local_cca:
-                logging.info("Using local CCA in anchor space.")
-                loss.fit_local_cca(
-                    X_pairs=X_pairs,
-                    Y_pairs=Y_pairs,
-                    # TODO complete with other hyperparameters
+            # # add paired data
+            # cov_tracker_X.update(X_pairs)
+            # cov_tracker_Y.update(Y_pairs)
+
+            # # compute mean and covariance
+            # Sxx_total, mean_x_total = cov_tracker_X.compute()
+            # Syy_total, mean_y_total = cov_tracker_Y.compute()
+
+            # loss.precompute_anchor_covariances(
+            #     X_pairs=X_pairs,
+            #     Y_pairs=Y_pairs,
+            #     Sxx_total=Sxx_total,
+            #     Syy_total=Syy_total,
+            #     mean_x_total=mean_x_total,
+            #     mean_y_total=mean_y_total,
+            # )
+
+            if args.affinity == "cca":
+                affinity = CCA(
+                    n_components=None,
+                    lam_x=args.cca_lam_x,
+                    lam_y=args.cca_lam_y,
+                    eps=args.eig_eps,
                 )
-            elif args.sparse_cca:
-                logging.info("Using sparse CCA in anchor space.")
-                loss.fit_sparse_cca(
-                    X=X_pairs,
-                    Y=Y_pairs,
-                    # penalty_x=args.sparse_cca_penalty_x,
-                    # penalty_y=args.sparse_cca_penalty_y,
-                    # max_iter=args.sparse_cca_max_iter,
-                    # tol=args.sparse_cca_tol,
-                )
+            elif args.affinity == "anchor":
+                affinity = Anchors()
             else:
+                raise ValueError("Choose between 'cca' or 'anchor' for affinity.")
 
-                cov_tracker_X = IncrementalCovariance(
-                    device, hidden_dim=X_pairs.shape[1]
-                )
-                cov_tracker_Y = IncrementalCovariance(
-                    device, hidden_dim=Y_pairs.shape[1]
-                )
+            affinity.fit(X_pairs.to(device), Y_pairs.to(device))
+            loss.affinity = affinity
 
-                # add paired data
-                cov_tracker_X.update(X_pairs)
-                cov_tracker_Y.update(Y_pairs)
-
-                # add unpaired data
-                # TODO may not be beneficial for totally unpaired setting due to domain shift
-                # for batch_x, batch_y in zip(text_loader, image_loader):
-                #     batch_x = F.normalize(batch_x, p=2, dim=1)
-                #     batch_y = F.normalize(batch_y, p=2, dim=1)
-                #     cov_tracker_X.update(batch_x)
-                #     cov_tracker_Y.update(batch_y)
-
-                # compute mean and covariance
-                Sxx_total, mean_x_total = cov_tracker_X.compute()
-                Syy_total, mean_y_total = cov_tracker_Y.compute()
-
-                loss.precompute_anchor_covariances(
-                    X_pairs=X_pairs,
-                    Y_pairs=Y_pairs,
-                    Sxx_total=Sxx_total,
-                    Syy_total=Syy_total,
-                    mean_x_total=mean_x_total,
-                    mean_y_total=mean_y_total,
-                )
-
-                if args.procrustes:
-                    logging.info("Using Procrustes alignment in anchor space.")
-                    loss.precompute_procrustes_projections()
-                else:
-                    logging.info("Using linear CCA in anchor space.")
-                    loss.precompute_cca_projections()
-
-            if args.alpha_semisupervised_clusters > 0:
-                loss.init_clusters(
-                    X_pairs,
-                    Y_pairs,
-                    n_clusters=args.semisupervised_clusters,
-                    use_cca=False,
-                )
+    monitor_metric = "mean_R@1"
+    best_metric = float("-inf")
 
     for epoch in range(start_epoch, args.epochs):
         if is_master(args):
@@ -472,11 +449,9 @@ def main(args):
                 model, data, loss, epoch, optimizer, scaler, scheduler, args
             )
         else:
-            raise ValueError("Please specify either --semisupervised or --supervised.")
-
-        #     train_one_epoch(
-        #         model, data, loss, epoch, optimizer, scaler, scheduler, args
-        #     )
+            raise ValueError(
+                "Please choose between semisupervised or supervised training."
+            )
 
         completed_epoch = epoch + 1
 

@@ -109,6 +109,13 @@ class SentenceEmbedding(nn.Module):
             self.model = CLIPTextModel.from_pretrained(
                 model_name, device_map=self.device
             ).half()
+        elif any(x in model_name for x in ["qwen", "nemotron"]):
+            self.model = AutoModel.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+                device_map=self.device,
+                torch_dtype=torch.bfloat16,
+            )
         else:
             self.model = AutoModel.from_pretrained(
                 model_name, trust_remote_code=True, device_map=self.device

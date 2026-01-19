@@ -13,12 +13,11 @@ except:
     pass
 from packaging import version
 import transformers
-from .dinoforseg import Dinov2EncoderForSegmentation
 import pdb
 
-from .mae import get_mae_vit
-from .ibot import get_ibot_vit
-from .ijepa import get_ijepa_vit
+# from .mae import get_mae_vit
+# from .ibot import get_ibot_vit
+# from .ijepa import get_ijepa_vit
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

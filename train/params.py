@@ -652,12 +652,6 @@ def parse_args(args):
         help="Weight to balance contrastive and reconstruction loss.",
     )
     parser.add_argument(
-        "--mmap",
-        default=False,
-        action="store_true",
-        help="Use representations stored in memory-mapped array.",
-    )
-    parser.add_argument(
         "--hdf5",
         default=False,
         action="store_true",
@@ -669,12 +663,6 @@ def parse_args(args):
         default=False,
         action="store_true",
         help="Use optimal transport based alignment loss.",
-    )
-    parser.add_argument(
-        "--alpha_marginal",
-        default=0,
-        type=float,
-        help="Weight for OT loss",
     )
     parser.add_argument(
         "--alpha_supervised_sail",
@@ -692,44 +680,12 @@ def parse_args(args):
         default=0.0,
     )
     parser.add_argument(
-        "--alpha_supervised_explicit",
-        default=0,
-        type=float,
-        help="Weight for OT loss",
-    )
-    parser.add_argument(
-        "--alpha_supervised_implicit",
-        default=0,
-        type=float,
-        help="Weight for OT loss",
-    )
-    parser.add_argument(
         "--alpha_semisupervised_ot",
         type=float,
         default=0.0,
     )
     parser.add_argument(
-        "--alpha_semisupervised_clusters",
-        type=float,
-        default=0.0,
-    )
-    parser.add_argument(
-        "--semisupervised_clusters",
-        type=int,
-        default=None,
-    )
-    parser.add_argument(
-        "--alpha_semisupervised_double_softmax",
-        type=float,
-        default=0.0,
-    )
-    parser.add_argument(
-        "--alpha_semisupervised_conditional_kl",
-        type=float,
-        default=0.0,
-    )
-    parser.add_argument(
-        "--alpha_semisupervised_joint_kl",
+        "--alpha_semisupervised_softmax",
         type=float,
         default=0.0,
     )
@@ -739,30 +695,9 @@ def parse_args(args):
         default=0.1,
     )
     parser.add_argument(
-        "--outlier_fraction",
-        type=float,
-        help="Fraction of outliers to remove when initializing cluster anchors.",
-    )
-    parser.add_argument(
-        "--min_cluster_size",
-        type=int,
-        help="Minimum cluster size to keep when initializing cluster anchors.",
-    )
-    parser.add_argument(
         "--alpha_semisupervised_ot_all",
         type=float,
         default=0.0,
-    )
-    parser.add_argument(
-        "--alpha_semisupervised_div",
-        type=float,
-        default=0.0,
-    )
-    parser.add_argument(
-        "--alpha_unsupervised",
-        default=0,
-        type=float,
-        help="Weight for OT loss",
     )
     parser.add_argument(
         "--epsilon_sinkhorn_anchor",
@@ -827,19 +762,6 @@ def parse_args(args):
         type=int,
         default=None,
     )
-    # anchor advanced options
-    parser.add_argument(
-        "--anchor_center",
-        default=False,
-        action="store_true",
-        help="Center anchors when computing OT plan.",
-    )
-    parser.add_argument(
-        "--anchor_whiten",
-        default=False,
-        action="store_true",
-        help="Whiten anchors when computing OT plan.",
-    )
     parser.add_argument(
         "--cca_lam_x",
         type=float,
@@ -865,30 +787,6 @@ def parse_args(args):
         type=float,
         default=1e-8,
         help="Epsilon for eigenvalue regularization in CCA.",
-    )
-    parser.add_argument(
-        "--anchor_relrenorm",
-        default=False,
-        action="store_true",
-        help="Use relative renormalization for anchor OT plan.",
-    )
-    parser.add_argument(
-        "--unbalanced",
-        default=False,
-        action="store_true",
-        help="Use unbalanced optimal transport.",
-    )
-    parser.add_argument(
-        "--tau_x",
-        type=float,
-        default=1.0,
-        help="Unbalanced OT tau_x parameter.",
-    )
-    parser.add_argument(
-        "--tau_y",
-        type=float,
-        default=1.0,
-        help="Unbalanced OT tau_y parameter.",
     )
     parser.add_argument(
         "--debugging",
@@ -1044,62 +942,16 @@ def parse_args(args):
     )
     parser.add_argument(
         "--match_all",
-        default=False,
-        action="store_true",
+        default=None,
+        type=str,
+        choices=["crossmodal", "intramodal"],
         help="Match all supervised and unsupervised samples when computing OT plan.",
-    )
-    parser.add_argument(
-        "--tol_sinkhorn",
-        type=float,
-        default=1e-6,
-        help="Tolerance for Sinkhorn algorithm.",
-    )
-    parser.add_argument(
-        "--kernel_cca",
-        default=False,
-        action="store_true",
-        help="Use kernel CCA in anchor space.",
-    )
-    parser.add_argument(
-        "--kcca_kappa",
-        type=float,
-        help="KCCA regularization parameter.",
-    )
-    parser.add_argument(
-        "--kcca_sigma",
-        type=int,
-        default=None,
-        help="KCCA RBF kernel width.",
-    )
-    parser.add_argument(
-        "--kcca_top_k",
-        type=int,
-        default=None,
-        help="KCCA top-k sparsification.",
     )
     parser.add_argument(
         "--multi_text_mode",
         default=False,
         action="store_true",
         help="Use multiple text embeddings per image in anchor space.",
-    )
-    parser.add_argument(
-        "--procrustes",
-        default=False,
-        action="store_true",
-        help="Use Procrustes analysis for anchor alignment.",
-    )
-    parser.add_argument(
-        "--local_cca",
-        default=False,
-        action="store_true",
-        help="Use local CCA for alignment.",
-    )
-    parser.add_argument(
-        "--sparse_cca",
-        default=False,
-        action="store_true",
-        help="Use sparse CCA for alignment.",
     )
     parser.add_argument(
         "--structure",
@@ -1132,6 +984,13 @@ def parse_args(args):
         "--structure_levels",
         type=int,
         help="Number of levels for structure preservation loss.",
+    )
+    parser.add_argument(
+        "--affinity",
+        type=str,
+        default=None,
+        choices=["cca", "anchor"],
+        help="Affinity for anchor space.",
     )
 
     args = parser.parse_args(args)

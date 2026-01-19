@@ -100,16 +100,16 @@ def sinkhorn(
     for n_iters in range(max_iter):
         u = torch.log(a) - torch.logsumexp(K + v[None, :], dim=1).squeeze()
         v = torch.log(b) - torch.logsumexp(K + u[:, None], dim=0).squeeze()
-
+        """
         # Check convergence once every {check_convergence_every} iterations
-        # if n_iters % check_convergence_every == 0:
-        #     T = torch.exp(K + u[:, None] + v[None, :])
-        #     marginal = torch.sum(T, dim=1)
-        #     # err = torch.max(torch.abs(marginal - a))
-        #     err = torch.sqrt(torch.mean((marginal - a) ** 2))
-        #     if err < tol:
-        #         break
-
+        if n_iters % check_convergence_every == 0:
+            T = torch.exp(K + u[:, None] + v[None, :])
+            marginal = torch.sum(T, dim=1)
+            #err = torch.max(torch.abs(marginal - a))
+            err = torch.sqrt(torch.mean((marginal - a)**2))
+            if err < tol:
+                break
+            """
     if (
         symmetric
     ):  # Make it more symmetric, no marginals are exactly satisfied, both are approximately satisfied.
@@ -120,8 +120,10 @@ def sinkhorn(
 
     log_T = K + u[:, None] + v[None, :]  # Marginals on the left are correct
     T = torch.exp(log_T)
+    marginal = torch.sum(T, dim=1)
+    err = torch.sqrt(torch.mean((marginal - a) ** 2))
 
-    return {"plan": T, "log_plan": log_T, "n_iters": n_iters}
+    return {"plan": T, "log_plan": log_T, "n_iters": n_iters, "err": err}
 
 
 def top_k_accuracy(C, k):
@@ -148,68 +150,3 @@ def accuracy(T):
     preds = T.argmax(dim=1)  # Shape (n,)
     correct = (preds == target).float()  # Shape (n,)
     return correct
-
-
-if __name__ == "__main__":
-    # Simple test
-    nx = 5
-    ny = 5
-    dx = 3
-    dy = 3
-    X1 = torch.randn((nx, dx))
-    C1 = X1 @ X1.T
-    X2 = torch.randn((ny, dy))
-    C2 = X2 @ X2.T
-    T = torch.rand((nx, ny))
-    T = sinkhorn(-T, epsilon=0.1, max_iter=1000)["plan"]
-
-    loss1 = basic_quad_loss(C1, C2, T)
-    loss2 = optimized_quad_loss(X1, X2, T)
-    print("Loss difference:", torch.abs(loss1 - loss2).item())
-    print("Loss1:", loss1.item())
-    print("Loss2:", loss2.item())
-
-
-if __name__ == "__main__":
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    n = 8
-    C1 = torch.rand((n, n), device=device)
-    C2 = torch.rand((n, n), device=device)
-    T = torch.rand((n, n), device=device)
-    T = sinkhorn(-T, epsilon=0.1, max_iter=1000)["plan"]
-
-    loss_true = torch.empty((n, n, n, n), device=device)
-    for i in range(n):
-        for j in range(n):
-            for k in range(n):
-                for l in range(n):
-                    loss_true[i, j, k, l] = (
-                        (C1[i, j] - C2[k, l]) ** 2 * T[i, k] * T[j, l]
-                    )
-    loss_true = loss_true.sum()
-    print("True quad loss:", loss_true.item())
-    loss = basic_quad_loss(C1, C2, T)
-    print("Computed quad loss:", loss.item())
-
-    M = torch.rand((n, n), device=device)
-    loss = basic_lin_loss(M, T)
-    print("Lin loss:", loss.item())
-
-    a = torch.ones(n, device=device) / n
-    b = torch.ones(n, device=device) / n
-    print(T.shape)
-    loss = basic_marginal_loss(T, a, b)
-    print("Marginal loss:", loss.item())
-
-
-if __name__ == "__main__" and False:
-    from utils import log_softmax_row_col
-    import torch
-    from math import log
-
-    K = torch.randn(5, 5)
-    log_plan1 = sinkhorn(K, epsilon=1, max_iter=0)["log_plan"]
-    log_plan2 = log_softmax_row_col(-K) - log(5)
-
-    assert torch.allclose(log_plan1, log_plan2, atol=1e-5)
