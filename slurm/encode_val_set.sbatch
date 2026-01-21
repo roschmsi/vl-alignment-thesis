@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name="encode"
+#SBATCH --job-name="encode validation set"
 #SBATCH --partition=gpu_p
 #SBATCH --qos=gpu_normal
 #SBATCH --mem=100G
@@ -26,7 +26,7 @@ batch_size=32
 source_caption="raw_caption"
 agg_mode="concat"
 
-input_dir="/lustre/groups/eml/projects/sroschmann/cc3m_recaptioned"
+input_dir="/lustre/groups/eml/projects/sroschmann/cc3m"
 output_dir="/lustre/groups/eml/projects/sroschmann/vl-alignment-test"
 
 python /home/eml/simon.roschmann/vl-alignment-thesis/encode.py \
@@ -40,4 +40,5 @@ python /home/eml/simon.roschmann/vl-alignment-thesis/encode.py \
 --agg_mode "$agg_mode" \
 --num_workers 4 \
 --input_dir "$input_dir" \
---output_dir "$output_dir"
+--output_dir "$output_dir" \
+--split validation

@@ -402,7 +402,6 @@ def load_webdataset(data_path, source_caption, domain):
         dataset = dataset.decode("pil")
 
         def image_extractor(sample):
-            print(sample.keys())
             if "jpg" in sample.keys():
                 return sample["jpg"]
             elif "jpeg" in sample.keys():
@@ -410,22 +409,19 @@ def load_webdataset(data_path, source_caption, domain):
             else:
                 raise ValueError("No key for jpg images.")
 
-        dataset = dataset.map(image_extractor, handler=wds.warn_and_continue)
+        dataset = dataset.map(image_extractor, handler=wds.reraise_exception)
 
     elif domain == "text":
         if "recaptioned" in data_path:
             dataset = dataset.decode()
 
         def text_extractor(sample):
-            print(sample.keys())
-            # print(sample["json"].keys())
             if "json" in sample.keys():
                 return sample["json"][source_caption]
             elif "txt" in sample.keys():
-                # print(sample["txt"].decode("utf-8"))
                 return sample["txt"].decode("utf-8")
 
-        dataset = dataset.map(text_extractor, handler=wds.warn_and_continue)
+        dataset = dataset.map(text_extractor, handler=wds.reraise_exception)
 
     return dataset
 
