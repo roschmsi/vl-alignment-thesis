@@ -29,6 +29,7 @@ from train.file_utils import pt_load
 from train.train import (
     _collect_all_batches,
     evaluate,
+    train_one_epoch,
     train_one_epoch_semisupervised,
     train_one_epoch_supervised,
 )
@@ -377,62 +378,6 @@ def main(args):
 
     loss = create_loss(args)
 
-    if args.semisupervised and args.ot and args.affinity is not None:
-        with torch.no_grad():
-            bimodal_loader = data["train"].bimodal_loader
-
-            X_pairs, Y_pairs = _collect_all_batches(bimodal_loader)
-            X_pairs = X_pairs.to(device, non_blocking=True)
-            Y_pairs = Y_pairs.to(device, non_blocking=True)
-
-            # TODO check if weighting other than mean is better for multi-view text
-            if X_pairs.ndim == 3:
-                logging.info(
-                    "Collapsing multi-view text to robust mean for Anchor Space."
-                )
-                X_pairs = F.normalize(X_pairs, p=2, dim=-1)
-                X_pairs = X_pairs.mean(dim=1)
-                X_pairs = F.normalize(X_pairs, p=2, dim=-1)
-
-            # ensure normalization
-            X_pairs = F.normalize(X_pairs, p=2, dim=1)
-            Y_pairs = F.normalize(Y_pairs, p=2, dim=1)
-
-            # cov_tracker_X = IncrementalCovariance(device, hidden_dim=X_pairs.shape[1])
-            # cov_tracker_Y = IncrementalCovariance(device, hidden_dim=Y_pairs.shape[1])
-
-            # # add paired data
-            # cov_tracker_X.update(X_pairs)
-            # cov_tracker_Y.update(Y_pairs)
-
-            # # compute mean and covariance
-            # Sxx_total, mean_x_total = cov_tracker_X.compute()
-            # Syy_total, mean_y_total = cov_tracker_Y.compute()
-
-            # loss.precompute_anchor_covariances(
-            #     X_pairs=X_pairs,
-            #     Y_pairs=Y_pairs,
-            #     Sxx_total=Sxx_total,
-            #     Syy_total=Syy_total,
-            #     mean_x_total=mean_x_total,
-            #     mean_y_total=mean_y_total,
-            # )
-
-            if args.affinity == "cca":
-                affinity = CCA(
-                    n_components=None,
-                    lam_x=args.cca_lam_x,
-                    lam_y=args.cca_lam_y,
-                    eps=args.eig_eps,
-                )
-            elif args.affinity == "anchor":
-                affinity = Anchors()
-            else:
-                raise ValueError("Choose between 'cca' or 'anchor' for affinity.")
-
-            affinity.fit(X_pairs.to(device), Y_pairs.to(device))
-            loss.affinity = affinity
-
     monitor_metric = "mean_R@1"
     best_metric = float("-inf")
 
@@ -440,18 +385,7 @@ def main(args):
         if is_master(args):
             logging.info(f"Start epoch {epoch}")
 
-        if args.semisupervised:
-            train_one_epoch_semisupervised(
-                model, data, loss, epoch, optimizer, scaler, scheduler, args
-            )
-        elif args.supervised:
-            train_one_epoch_supervised(
-                model, data, loss, epoch, optimizer, scaler, scheduler, args
-            )
-        else:
-            raise ValueError(
-                "Please choose between semisupervised or supervised training."
-            )
+        train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args)
 
         completed_epoch = epoch + 1
 

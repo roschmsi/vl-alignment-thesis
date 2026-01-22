@@ -14,20 +14,16 @@
 source /home/eml/simon.roschmann/miniconda3/etc/profile.d/conda.sh
 conda activate ot_env
 
-# bash /home/eml/simon.roschmann/ot-alignment/scripts/ot_train.sh
-
-#!/bin/bash
-
-epoch_num=100  # 300  # 800
-lr=1e-3
+epoch_num=20
+lr=1e-4
 bs=32768
 d=1024
-width_factor=1 # 8
+width_factor=8
 logit_scale=20
 logit_bias=-10
 
-image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
-# image_model="facebook/dinov2-large"
+# image_model="facebook/dinov3-vitl16-pretrain-lvd1689m"
+image_model="facebook/dinov2-large"
 # text_model="Qwen/Qwen3-Embedding-8B"
 # text_model="nvidia/llama-embed-nemotron-8b"
 text_model="nvidia/NV-Embed-v2"
@@ -35,10 +31,7 @@ text_model="nvidia/NV-Embed-v2"
 base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data"
 
 supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
-unsupervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
-supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # /cc3m_raw_caption.h5"
-# unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=0.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=1.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=2.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=3.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=4.h5" # wikitext103_raw_caption.h5"
+supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5"
 
 val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
 val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
@@ -53,9 +46,6 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 python /home/eml/simon.roschmann/ot-alignment/main.py \
     --supervised_text_embedding $supervised_text_embedding \
     --supervised_image_embedding $supervised_image_embedding \
-    --unsupervised_text_embedding $unsupervised_text_embedding \
-    --unsupervised_image_embedding $unsupervised_image_embedding \
-    --unsupervised_index_mode disjoint \
     --val_image_embedding $val_image_embedding \
     --val_text_embedding $val_text_embedding \
     --val-frequency 1 \
@@ -81,25 +71,8 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --logit_bias $logit_bias \
     --logs $output_dir \
     --hdf5 \
-    --ot \
-    --semisupervised \
-    --n_supervised_pairs 10000 \
-    --batch-size-supervised 10000 \
-    --n_unsupervised_image 1000000 \
-    --n_unsupervised_text 1000000 \
-    --cca_lam_x 0.1 \
-    --cca_lam_y 0.1 \
-    --eig_eps 1e-6 \
-    --alpha_semisupervised_sail 1.0 \
-    --alpha_semisupervised_ot 0.0001 \
-    --epsilon_sinkhorn_shared 0.05 \
-    --n_iters_sinkhorn_shared 100 \
-    --epsilon_sinkhorn_anchor 0.01 \
-    --n_iters_sinkhorn_anchor 100 \
-    --optimized_matching \
-    --affinity cca
-    # --alpha_semisupervised_sail 1.0 \
-    # --match_all
+    --supervised \
+    --debugging
 
 if [ $? -ne 0 ]; then
     echo "Training failed. Checking for checkpoints..."

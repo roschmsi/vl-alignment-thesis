@@ -4,7 +4,7 @@ epoch_num=20
 lr=1e-4
 bs=32768
 d=1024
-width_factor=1 # 8
+width_factor=8
 logit_scale=20
 logit_bias=-10
 
@@ -17,31 +17,21 @@ text_model="nvidia/NV-Embed-v2"
 base_embedding_dir="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data"
 
 supervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5"
-unsupervised_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat.h5" # imagenet1k_concat.h5"
-supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # cc3m_raw_caption.h5"
-# unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5" # wikitext103_raw_caption.h5"
-unsupervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=0.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=1.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=2.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=3.h5 ${base_embedding_dir}/text_embedding/${text_model##*/}/coco_raw_caption_idx=4.h5" # wikitext103_raw_caption.h5"
+supervised_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption.h5"
 
 val_image_embedding="${base_embedding_dir}/image_embedding/${image_model##*/}/cc3m_concat_validation.h5"
 val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_raw_caption_validation.h5"
 
-# extra_text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_shortSV_captions.h5"
-# image_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/image_embedding/dinov2-large/cc3m_concat_first100k.h5"
-# text_embedding_list="/lustre/groups/eml/projects/sroschmann/ot-alignment/tensor_data/text_embedding/NV-Embed-v2/cc3m_raw_caption_first100k.h5"
-
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 current_time=$(date +%Y-%m-%d_%H-%M-%S)
-output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_coco_text_deb" # topk_x=256_topk_y=128"
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_sup=10k_unsup=1M_ep=100_lr=1e-3" # topk_x=256_topk_y=128"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
-python /home/eml/simon.roschmann/ot-alignment/main.py \
+python /home/eml/simon.roschmann/vl-alignment-thesis/main.py \
     --supervised_text_embedding $supervised_text_embedding \
     --supervised_image_embedding $supervised_image_embedding \
-    --unsupervised_text_embedding $unsupervised_text_embedding \
-    --unsupervised_image_embedding $unsupervised_image_embedding \
-    --unsupervised_index_mode disjoint \
     --val_image_embedding $val_image_embedding \
     --val_text_embedding $val_text_embedding \
     --val-frequency 1 \
@@ -53,7 +43,7 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --batch-size $bs \
     --lr $lr \
     --epochs $epoch_num \
-    --workers 24 \
+    --workers 8 \
     --optimizer lion \
     --siglip \
     --wd 1e-5 \
@@ -67,33 +57,7 @@ python /home/eml/simon.roschmann/ot-alignment/main.py \
     --logit_bias $logit_bias \
     --logs $output_dir \
     --hdf5 \
-    --ot \
-    --semisupervised \
-    --n_supervised_pairs 10000 \
-    --batch-size-supervised 10000 \
-    --n_unsupervised_image 1000000 \
-    --n_unsupervised_text 1000000 \
-    --cca_lam_x 0.1 \
-    --cca_lam_y 0.1 \
-    --eig_eps 1e-6 \
-    --alpha_semisupervised_sail 1.0 \
-    --alpha_semisupervised_ot 0.0001 \
-    --epsilon_sinkhorn_shared 0.05 \
-    --n_iters_sinkhorn_shared 100 \
-    --epsilon_sinkhorn_anchor 0.01 \
-    --n_iters_sinkhorn_anchor 100 \
-    --optimized_matching \
-    --affinity cca \
-    --debugging
-    # --optimized_matching \
-
-    # --multi_text_mode
-    # --cca_topk_x 512 \
-    # --cca_topk_y 512
-
-    # --optimized_matching \
-    # --match_all
-    # --debugging
+    --supervised
 
 if [ $? -ne 0 ]; then
     echo "Training failed. Checking for checkpoints..."

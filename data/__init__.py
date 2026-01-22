@@ -322,7 +322,7 @@ def get_embedding_dataset(
         bimodal_loader = DataLoader(
             bimodal_dataset,
             shuffle=True,
-            batch_size=min(batch_size, n_supervised_pairs),
+            batch_size=batch_size,
             num_workers=0,  # workers,
             pin_memory=True,
             drop_last=True,

@@ -423,15 +423,10 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
 
     model.train()
 
-    data["train"].set_epoch(
-        epoch
-    )  # set epoch in process safe manner via sampler or shared_epoch
-    dataloader = data["train"].dataloader
+    # data["train"].set_epoch(epoch)
+    dataloader = data["train"].bimodal_loader
     num_batches_per_epoch = dataloader.num_batches // args.accum_freq
     sample_digits = math.ceil(math.log(dataloader.num_samples + 1, 10))
-
-    if args.accum_freq > 1:
-        accum_images, accum_texts, accum_features = [], [], {}
 
     losses_m = {}
     batch_time_m = AverageMeter()
