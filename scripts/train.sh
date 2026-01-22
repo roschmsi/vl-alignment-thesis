@@ -25,7 +25,7 @@ val_text_embedding="${base_embedding_dir}/text_embedding/${text_model##*/}/cc3m_
 output_dir="/lustre/groups/eml/projects/sroschmann/ot_logs"
 
 current_time=$(date +%Y-%m-%d_%H-%M-%S)
-output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m_sup=10k_unsup=1M_ep=100_lr=1e-3" # topk_x=256_topk_y=128"
+output_name="${current_time}_${image_model##*/}_${text_model##*/}_cc3m"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 
